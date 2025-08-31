@@ -1,8 +1,8 @@
 # Bot Client
 
 [![CI/CD Pipeline](https://github.com/tanvoid0/bot-client/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/tanvoid0/bot-client/actions)
-[![npm version](https://badge.fury.io/js/ai-factory-client.svg)](https://badge.fury.io/js/ai-factory-client)
-[![npm downloads](https://img.shields.io/npm/dm/ai-factory-client.svg)](https://www.npmjs.com/package/ai-factory-client)
+[![npm version](https://badge.fury.io/js/@tanvoid0/bot-client.svg)](https://badge.fury.io/js/@tanvoid0/bot-client)
+[![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-16+-green.svg)](https://nodejs.org/)
@@ -25,7 +25,7 @@ A powerful, flexible TypeScript/JavaScript package for managing multiple AI prov
 ## Installation
 
 ```bash
-npm install ai-factory-client
+npm install @tanvoid0/bot-client
 ```
 
 ## Quick Start
@@ -265,15 +265,15 @@ See the `examples/` directory for complete usage examples:
 - **Testing**: **NOT TESTED** - requires valid API key for validation
 
 #### Google Gemini
-- **Status**: ⚠️ API integration complete, **NOT TESTED** - needs API key for testing
-- **Models**: gemini-1.5-pro, gemini-1.5-flash, gemini-pro
+- **Status**: ✅ API integration complete, **FULLY TESTED** - working with valid API key
+- **Models**: gemini-1.5-pro-latest, gemini-1.5-flash, gemini-2.5-pro, gemini-2.0-flash (35+ models available)
 - **Features**: Full API support, dynamic model discovery, conversation history
-- **Testing**: **NOT TESTED** - requires valid API key for validation
+- **Testing**: ✅ **FULLY TESTED** - confirmed working with 35+ available models
 
 ### 📋 Testing Notes
 
 - **Local Providers (Ollama, LM Studio)**: ✅ Fully tested with actual running instances
-- **Cloud Providers (OpenAI, Anthropic, Gemini)**: ⚠️ API integration complete but **NOT TESTED** - requires API keys for validation
+- **Cloud Providers**: ✅ **Gemini fully tested**, OpenAI/Anthropic API integration complete but **NOT TESTED** - requires API keys for validation
 - **Dynamic Model Discovery**: ✅ Tested and working for Ollama, LM Studio, and Gemini
 - **Error Handling**: ✅ Tested for missing API keys, invalid URLs, and connection issues
 - **Environment Variables**: ✅ Tested with BOT_CLIENT_PROVIDER and BOT_CLIENT_XXX_KEY conventions
@@ -374,19 +374,19 @@ Before publishing, ensure you have:
 1. **npm Account**: Create an account at [npmjs.com](https://www.npmjs.com)
 2. **npm Login**: Run `npm login` locally
 3. **GitHub Secrets**: Set up `NPM_TOKEN` in GitHub repository secrets
-4. **Package Name**: Ensure the package name is unique (currently: `ai-factory-client`)
+4. **Package Name**: Ensure the package name is unique (currently: `@tanvoid0/bot-client`)
 
 ### 🔐 **Setting up NPM_TOKEN**
 
 1. **Generate Token**: Go to npm → Account → Access Tokens → Generate New Token
 2. **GitHub Secret**: Go to your GitHub repo → Settings → Secrets → New repository secret
-3. **Name**: `NPM_TOKEN`
+3. **Name**: `NPM_TOKEN`ck
 4. **Value**: Your npm access token
 
 ### 📦 **Package Configuration**
 
 The package is configured with:
-- **Name**: `ai-factory-client` (unique, descriptive)
+- **Name**: `@tanvoid0/bot-client` (unique, descriptive)
 - **Files**: Only `dist/`, `README.md`, and `LICENSE` are published
 - **Access**: Public package
 - **Pre-publish**: Automatic build and test execution

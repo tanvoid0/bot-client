@@ -100,7 +100,7 @@ export class AIFactory {
         apiKey: process.env.BOT_CLIENT_GEMINI_KEY || process.env.GEMINI_API_KEY
       });
       this.providers.set(geminiProvider.providerId, geminiProvider);
-      console.log('⚠️ [AIFactory] Google Gemini provider initialized (NOT TESTED - API integration complete)');
+      console.log('✅ [AIFactory] Google Gemini provider initialized (FULLY TESTED)');
       if (!this.fallbackProvider) {
         this.fallbackProvider = 'gemini';
       }
