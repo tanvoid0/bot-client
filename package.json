@@ -1,0 +1,56 @@
+{
+  "name": "bot-client",
+  "version": "1.0.0",
+  "description": "A powerful, configurable npm package for easily switching between different AI models and providers. Fully tested with Ollama and LM Studio, with complete API integration for OpenAI, Anthropic, and Google Gemini (untested).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:package": "node test-package.js",
+    "lint": "eslint src/**/*.ts",
+    "docs": "typedoc src/index.ts --out docs",
+    "clean": "rm -rf dist docs",
+    "prepublishOnly": "npm run clean && npm run build && npm run test:package"
+  },
+  "keywords": [
+    "ai",
+    "openai",
+    "anthropic",
+    "ollama",
+    "lmstudio",
+    "gemini",
+    "chatgpt",
+    "claude",
+    "llm",
+    "machine-learning",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "typedoc": "^0.25.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
