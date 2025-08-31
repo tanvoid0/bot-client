@@ -18,7 +18,7 @@
     "test:package": "node test-package.js",
     "lint": "eslint src/**/*.ts",
     "docs": "typedoc src/index.ts --out docs",
-    "clean": "rm -rf dist docs",
+    "clean": "if exist dist rmdir /s /q dist && if exist docs rmdir /s /q docs",
     "prepublishOnly": "npm run clean && npm run build && npm run test:package"
   },
   "keywords": [
