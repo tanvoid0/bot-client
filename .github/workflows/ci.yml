@@ -44,9 +44,6 @@ jobs:
     - name: Run tests
       run: npm test
     
-    - name: Run unit tests only
-      run: npm test
-    
     - name: Run linting
       run: npm run lint
 
@@ -76,7 +73,9 @@ jobs:
   publish:
     needs: [test, security]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'publish'
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'publish') ||
+      (github.event_name == 'release' && github.event.action == 'published')
     
     steps:
     - uses: actions/checkout@v4
@@ -97,9 +96,40 @@ jobs:
     - name: Run tests
       run: npm test
     
+    - name: Check if package exists
+      id: check-package
+      run: |
+        if npm view ${{ env.npm_package_name }} version >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+    
     - name: Publish to npm
       run: npm publish
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    
+    - name: Create GitHub Release
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ env.npm_package_version }}
+        release_name: Release v${{ env.npm_package_version }}
+        body: |
+          ## What's Changed
+          
+          This release includes the latest updates to the AI Factory package.
+          
+          ### Version: ${{ env.npm_package_version }}
+          
+          ### Installation
+          ```bash
+          npm install ${{ env.npm_package_name }}
+          ```
+        draft: false
+        prerelease: false
 
 

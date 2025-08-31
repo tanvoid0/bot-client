@@ -1,8 +1,8 @@
 # Bot Client
 
 [![CI/CD Pipeline](https://github.com/tanvoid0/bot-client/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/tanvoid0/bot-client/actions)
-[![npm version](https://badge.fury.io/js/bot-client.svg)](https://badge.fury.io/js/bot-client)
-[![npm downloads](https://img.shields.io/npm/dm/bot-client.svg)](https://www.npmjs.com/package/bot-client)
+[![npm version](https://badge.fury.io/js/ai-factory-client.svg)](https://badge.fury.io/js/ai-factory-client)
+[![npm downloads](https://img.shields.io/npm/dm/ai-factory-client.svg)](https://www.npmjs.com/package/ai-factory-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-16+-green.svg)](https://nodejs.org/)
@@ -25,7 +25,7 @@ A powerful, flexible TypeScript/JavaScript package for managing multiple AI prov
 ## Installation
 
 ```bash
-npm install bot-client
+npm install ai-factory-client
 ```
 
 ## Quick Start
@@ -332,6 +332,82 @@ npm run test:integration
 # Test package functionality (before publishing)
 npm run test:package
 ```
+
+## Publishing to npm
+
+This project includes automated publishing workflows and manual publishing scripts.
+
+### 🚀 **Automated Publishing (Recommended)**
+
+The project uses GitHub Actions for automated publishing:
+
+1. **Create a Release**: Go to GitHub → Releases → "Create a new release"
+2. **Tag Version**: Use semantic versioning (e.g., `v1.0.2`)
+3. **Publish**: The CI/CD pipeline will automatically:
+   - ✅ Run all tests
+   - ✅ Build the package
+   - ✅ Publish to npm
+   - ✅ Create GitHub release
+
+### 🔧 **Manual Publishing**
+
+Use the provided publish scripts for manual publishing:
+
+```bash
+# Dry run (build and test only)
+npm run publish:dry
+
+# Publish patch version (1.0.1 → 1.0.2)
+npm run publish:patch
+
+# Publish minor version (1.0.1 → 1.1.0)
+npm run publish:minor
+
+# Publish major version (1.0.1 → 2.0.0)
+npm run publish:major
+```
+
+### 📋 **Prerequisites**
+
+Before publishing, ensure you have:
+
+1. **npm Account**: Create an account at [npmjs.com](https://www.npmjs.com)
+2. **npm Login**: Run `npm login` locally
+3. **GitHub Secrets**: Set up `NPM_TOKEN` in GitHub repository secrets
+4. **Package Name**: Ensure the package name is unique (currently: `ai-factory-client`)
+
+### 🔐 **Setting up NPM_TOKEN**
+
+1. **Generate Token**: Go to npm → Account → Access Tokens → Generate New Token
+2. **GitHub Secret**: Go to your GitHub repo → Settings → Secrets → New repository secret
+3. **Name**: `NPM_TOKEN`
+4. **Value**: Your npm access token
+
+### 📦 **Package Configuration**
+
+The package is configured with:
+- **Name**: `ai-factory-client` (unique, descriptive)
+- **Files**: Only `dist/`, `README.md`, and `LICENSE` are published
+- **Access**: Public package
+- **Pre-publish**: Automatic build and test execution
+
+### 🎯 **Version Management**
+
+The project follows semantic versioning:
+- **Patch** (1.0.1 → 1.0.2): Bug fixes
+- **Minor** (1.0.1 → 1.1.0): New features, backward compatible
+- **Major** (1.0.1 → 2.0.0): Breaking changes
+
+### 📊 **Publishing Checklist**
+
+Before publishing, verify:
+- ✅ All tests pass (`npm test`)
+- ✅ Build succeeds (`npm run build`)
+- ✅ Linting passes (`npm run lint`)
+- ✅ Documentation is up to date
+- ✅ README is accurate
+- ✅ Package name is unique
+- ✅ Version number is appropriate
 
 ## CI/CD Pipeline
 

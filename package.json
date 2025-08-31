@@ -20,7 +20,11 @@
     "lint": "eslint src/**/*.ts",
     "docs": "typedoc src/index.ts --out docs",
     "clean": "if exist dist rmdir /s /q dist && if exist docs rmdir /s /q docs",
-    "prepublishOnly": "npm run clean && npm run build && npm test"
+    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "publish:patch": "node scripts/publish.js patch",
+    "publish:minor": "node scripts/publish.js minor",
+    "publish:major": "node scripts/publish.js major",
+    "publish:dry": "node scripts/publish.js dry"
   },
   "keywords": [
     "ai",
@@ -53,5 +57,21 @@
   },
   "engines": {
     "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanvoid0/bot-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tanvoid0/bot-client/issues"
+  },
+  "homepage": "https://github.com/tanvoid0/bot-client#readme",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
