@@ -323,6 +323,12 @@ npm run lint
 # Generate documentation
 npm run docs
 
+# Run unit tests (CI/CD)
+npm test
+
+# Run integration tests (requires providers)
+npm run test:integration
+
 # Test package functionality (before publishing)
 npm run test:package
 ```

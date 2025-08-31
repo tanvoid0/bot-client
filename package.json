@@ -15,11 +15,12 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
+    "test:integration": "node scripts/test-integration.js",
     "test:package": "node test-package.js",
     "lint": "eslint src/**/*.ts",
     "docs": "typedoc src/index.ts --out docs",
     "clean": "if exist dist rmdir /s /q dist && if exist docs rmdir /s /q docs",
-    "prepublishOnly": "npm run clean && npm run build && npm run test:package"
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "keywords": [
     "ai",
