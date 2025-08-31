@@ -8,6 +8,17 @@ on:
   release:
     types: [ published ]
   workflow_dispatch:
+    inputs:
+      job:
+        description: 'Job to run'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+        - test
+        - security
+        - publish
+        - docs
 
 jobs:
   test:
@@ -66,7 +77,7 @@ jobs:
   publish:
     needs: [test, security]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'publish'
     
     steps:
     - uses: actions/checkout@v4
@@ -94,7 +105,7 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'docs')
     permissions:
       contents: read
       pages: write
