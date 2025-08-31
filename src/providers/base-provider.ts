@@ -34,7 +34,8 @@ export abstract class BaseProvider implements AIProvider {
     return this.client;
   }
 
-  abstract process(request: AIRequest): Promise<AIResponse>;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  abstract process(_request: AIRequest): Promise<AIResponse>;
 
   isModelSupported(modelId: string): boolean {
     return this.supportedModels.includes(modelId);

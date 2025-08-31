@@ -87,7 +87,8 @@ export class OllamaProvider extends BaseProvider {
   async testConnection(): Promise<boolean> {
     try {
       // First try to get available models
-      const models = await this.fetchAvailableModels();
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _models = await this.fetchAvailableModels();
       return true;
     } catch (error) {
       return false;

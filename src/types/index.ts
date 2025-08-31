@@ -4,8 +4,10 @@ export interface AIProvider {
   readonly providerName: string;
   readonly supportedModels: string[];
   
-  process(request: AIRequest): Promise<AIResponse>;
-  isModelSupported(modelId: string): boolean;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  process(_request: AIRequest): Promise<AIResponse>;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  isModelSupported(_modelId: string): boolean;
   getDefaultConfig(): AIProviderConfig;
   testConnection(): Promise<boolean>;
 }
@@ -124,6 +126,7 @@ export interface PostProcessingOptions {
 
 // Error Types
 export class AIError extends Error {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(
     message: string,
     public provider: string,
