@@ -95,6 +95,10 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     
     steps:
     - uses: actions/checkout@v4
@@ -118,3 +122,5 @@ jobs:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./docs
         force_orphan: true
+        # Alternative: use personal access token if GITHUB_TOKEN doesn't work
+        # github_token: ${{ secrets.GH_PAGES_TOKEN }}
