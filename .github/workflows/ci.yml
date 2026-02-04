@@ -106,7 +106,12 @@ jobs:
         fi
     
     - name: Publish to npm
-      run: npm publish
+      run: |
+        if [ -z "$NODE_AUTH_TOKEN" ]; then
+          echo "::error::NPM_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (name: NPM_TOKEN, value: your npm access token)."
+          exit 1
+        fi
+        npm publish
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     
