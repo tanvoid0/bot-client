@@ -1,34 +1,48 @@
-import {
-  AIRequest,
-  AIResponse,
-  AIProviderConfig
-} from '../types/index.js';
-import { BaseProvider } from './base-provider.js';
+import { AIRequest, AIResponse } from '../types/index.js';
+import { BaseProvider, buildChatMessages } from './base-provider.js';
 
-export interface LMStudioConfig {
-  host?: string;
-  port?: number;
-  supportedModels?: string[];
-  timeout?: number;
-  retries?: number;
+const DEFAULT_LMSTUDIO_BASE = 'http://localhost:1234';
+
+export interface LMStudioProviderConfig {
+  baseURL?: string;
 }
 
 export class LMStudioProvider extends BaseProvider {
-  private host: string;
-  private port: number;
-  private _supportedModels: string[] = [];
+  private readonly baseURL: string;
+  private _client: ReturnType<BaseProvider['createClient']> | null = null;
 
-  constructor(
-    config: AIProviderConfig, 
-    lmstudioConfig?: LMStudioConfig
-  ) {
-    super(config);
-    this.host = lmstudioConfig?.host || 'localhost';
-    this.port = lmstudioConfig?.port || 1234;
-    
-    // Initialize supported models from config or fallback to defaults
-    if (lmstudioConfig?.supportedModels) {
-      this._supportedModels = lmstudioConfig.supportedModels;
+  constructor(config?: LMStudioProviderConfig) {
+    super();
+    this.baseURL = config?.baseURL ?? DEFAULT_LMSTUDIO_BASE;
+  }
+
+  private getClient(): ReturnType<BaseProvider['createClient']> {
+    if (this._client) return this._client;
+    this._client = this.createClient(this.baseURL);
+    return this._client;
+  }
+
+  async testConnection(): Promise<boolean> {
+    try {
+      const client = this.getClient();
+      await client.get('/v1/models');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async discoverModels(): Promise<string[]> {
+    try {
+      const client = this.getClient();
+      const response = await client.get('/v1/models');
+
+      const models = response.data.data || [];
+      this._supportedModels = models.map((m: { id: string }) => m.id);
+
+      return this._supportedModels;
+    } catch {
+      return [];
     }
   }
 
@@ -40,92 +54,21 @@ export class LMStudioProvider extends BaseProvider {
     return 'LM Studio';
   }
 
-  get supportedModels(): string[] {
-    return this._supportedModels.length > 0 ? this._supportedModels : this.config.supportedModels;
-  }
-
   async process(request: AIRequest): Promise<AIResponse> {
     try {
-      const mergedRequest = this.mergeRequestOptions(request);
-      
-      // If no model is specified, try to get the first available model
-      let modelToUse = mergedRequest.modelId;
-      if (!modelToUse) {
-        const availableModels = await this.fetchAvailableModels();
-        if (availableModels.length > 0) {
-          modelToUse = availableModels[0];
-        } else {
-          throw new Error('No models available in LM Studio');
-        }
-      }
-      
       const client = this.getClient();
+      const messages = buildChatMessages(request);
       const response = await client.post('/v1/chat/completions', {
-        model: modelToUse,
-        messages: this.buildMessages(mergedRequest),
-        max_tokens: mergedRequest.maxTokens,
-        temperature: mergedRequest.temperature
+        model: request.modelId ?? this.supportedModels[0],
+        messages,
+        max_tokens: request.maxTokens ?? 1000,
+        temperature: request.temperature ?? 0.7
       });
 
-      const data = response.data;
-      const content = data.choices?.[0]?.message?.content || '';
-      const usage = data.usage?.total_tokens || 0;
-
-      return this.createSuccessResponse(
-        content,
-        modelToUse,
-        usage
-      );
-
+      const content = response.data.choices?.[0]?.message?.content ?? '';
+      return this.createResponse(true, content, undefined, request.modelId);
     } catch (error) {
       this.handleError(error, 'LM Studio processing');
     }
-  }
-
-  async testConnection(): Promise<boolean> {
-    try {
-      // Try to get available models
-      await this.fetchAvailableModels();
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async fetchAvailableModels(): Promise<string[]> {
-    try {
-      const client = this.getClient();
-      const response = await client.get('/v1/models');
-      const models = response.data.data || [];
-      this._supportedModels = models.map((model: any) => model.id);
-      return this._supportedModels;
-    } catch (error) {
-      // Fallback to configured models if API call fails
-      return this.config.supportedModels;
-    }
-  }
-
-  protected override createClient() {
-    const client = super.createClient();
-    client.defaults.baseURL = `http://${this.host}:${this.port}`;
-    return client;
-  }
-
-  private buildMessages(request: AIRequest): Array<{ role: string; content: string }> {
-    const messages: Array<{ role: string; content: string }> = [];
-
-    if (request.systemPrompt) {
-      messages.push({ role: 'system', content: request.systemPrompt });
-    }
-
-    if (request.history && request.history.length > 0) {
-      request.history.forEach(msg => {
-        messages.push({ role: msg.role, content: msg.content });
-      });
-    }
-
-    messages.push({ role: 'user', content: request.prompt });
-
-    return messages;
   }
 }

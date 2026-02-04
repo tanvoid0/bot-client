@@ -1,14 +1,13 @@
-import { AIFactory, AIRequest, AIFactoryConfig } from '../src/index';
+import { AIFactory, AIRequest } from '../dist/index.js';
 
 async function multipleProvidersExample() {
   try {
-    // Create a custom AI Factory with specific configuration
     const customFactory = new AIFactory({
       defaultProvider: 'openai',
       fallbackProvider: 'ollama'
     });
+    await customFactory.ready();
 
-    // Test available providers
     const availableProviders = customFactory.getAvailableProviders();
     console.log('Available providers:', availableProviders);
 

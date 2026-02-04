@@ -1,464 +1,259 @@
 # Bot Client
 
 [![CI/CD Pipeline](https://github.com/tanvoid0/bot-client/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/tanvoid0/bot-client/actions)
-[![npm version](https://badge.fury.io/js/@tanvoid0/bot-client.svg)](https://badge.fury.io/js/@tanvoid0/bot-client)
+[![npm version](https://img.shields.io/npm/v/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-16+-green.svg)](https://nodejs.org/)
-[![Security Audit](https://img.shields.io/badge/Security%20Audit-passing-brightgreen.svg)](https://github.com/tanvoid0/bot-client/actions)
-[![Test Coverage](https://img.shields.io/badge/Test%20Coverage-95%25-brightgreen.svg)](https://github.com/tanvoid0/bot-client/actions)
 
-A powerful, flexible TypeScript/JavaScript package for managing multiple AI providers with intelligent model selection, dynamic discovery, and enhanced response processing.
+Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio. Zero-config for local; API keys for cloud. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
 
-## 🚀 Features
+---
 
-- **Multi-Provider Support**: OpenAI, Anthropic, Google Gemini, Ollama, LM Studio
-- **Dynamic Model Discovery**: Automatically discovers available models from local providers
-- **Intelligent Provider Selection**: Chooses the best provider based on model availability, cost, and quality preferences
-- **Zero Configuration**: Works out of the box with minimal setup
-- **TypeScript Support**: Full type safety and IntelliSense
-- **Enhanced Responses**: Includes processing time, confidence scores, and improvement suggestions
-- **Custom Providers**: Easy to extend with your own AI providers
-- **Conversation History**: Built-in support for multi-turn conversations
-
-## Installation
+## Install
 
 ```bash
 npm install @tanvoid0/bot-client
 ```
 
-## Quick Start
-
-> **📋 Testing Status**: This package has been fully tested with **Ollama** and **LM Studio** (local providers). Cloud providers (OpenAI, Anthropic, Gemini) have complete API integration but are **NOT TESTED** and require API keys for validation.
-
-### Minimal Setup
+## Quick start
 
 ```typescript
-import { aiFactory } from 'bot-client';
+import { aiFactory } from '@tanvoid0/bot-client';
 
-// Simple text generation
-const response = await aiFactory.generate(
-  "Write a short story about a robot learning to paint",
-  {
-    modelId: 'gpt-3.5-turbo',
-    maxTokens: 500,
-    temperature: 0.8
-  }
-);
-
-console.log(response);
+const text = await aiFactory.generate('Say hello in one sentence.', { maxTokens: 100 });
+console.log(text);
 ```
 
-### Environment Setup
+With **Ollama** running locally, this works without API keys. For cloud providers, set env vars (see [Environment](#environment)).
 
-Set up your API keys for cloud providers:
+---
+
+## npx CLI
+
+Manage Ollama models and API keys from the terminal:
 
 ```bash
-# Recommended: Use BOT_CLIENT_XXX_KEY convention to avoid conflicts
-export BOT_CLIENT_OPENAI_KEY="your-openai-api-key"
-export BOT_CLIENT_ANTHROPIC_KEY="your-anthropic-api-key"
-export BOT_CLIENT_GEMINI_KEY="your-gemini-api-key"
-
-# Set default provider (optional)
-export BOT_CLIENT_PROVIDER="ollama"  # Options: openai, anthropic, gemini, ollama, lmstudio
-
-# Alternative: Legacy environment variable names (still supported)
-export OPENAI_API_KEY="your-openai-api-key"
-export ANTHROPIC_API_KEY="your-anthropic-api-key"
-export GEMINI_API_KEY="your-gemini-api-key"
+npx @tanvoid0/bot-client help
+npx @tanvoid0/bot-client ollama list
+npx @tanvoid0/bot-client ollama pull llama3.1:8b
+npx @tanvoid0/bot-client keys list
+npx @tanvoid0/bot-client keys set BOT_CLIENT_OPENAI_KEY sk-...
 ```
 
-For local providers (Ollama, LM Studio), just ensure they're running on their default ports.
+<details>
+<summary><strong>Ollama commands</strong></summary>
 
-### Advanced Usage
+| Command | Description |
+|--------|-------------|
+| `ollama list` / `ollama ls` | List models |
+| `ollama pull <model>` | Pull a model |
+| `ollama rm <model>` | Remove a model |
+| `ollama show <model>` | Show model info |
+| `ollama ps` | List running models |
+| `ollama run <model> [prompt]` | Run model (optional prompt) |
+
+Uses the local Ollama API when the server is up; falls back to the `ollama` CLI.
+</details>
+
+<details>
+<summary><strong>Keys commands</strong></summary>
+
+Read/write `.env` in the current directory.
+
+| Command | Description |
+|--------|-------------|
+| `keys list` / `keys ls` | List known API keys (masked) |
+| `keys get <key> [--show]` | Get value (masked unless `--show`) |
+| `keys set <key> <value>` | Set key in `.env` |
+
+Known keys: `BOT_CLIENT_PROVIDER`, `BOT_CLIENT_OPENAI_KEY`, `BOT_CLIENT_ANTHROPIC_KEY`, `BOT_CLIENT_GEMINI_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`.
+</details>
+
+---
+
+## Environment
+
+<details>
+<summary><strong>API keys and provider</strong></summary>
+
+```bash
+# Provider (optional): ollama | openai | anthropic | gemini | lmstudio
+export BOT_CLIENT_PROVIDER=ollama
+
+# Keys (recommended names)
+export BOT_CLIENT_OPENAI_KEY="sk-..."
+export BOT_CLIENT_ANTHROPIC_KEY="sk-ant-..."
+export BOT_CLIENT_GEMINI_KEY="..."
+
+# Legacy names (still supported)
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GEMINI_API_KEY="..."
+```
+
+Local providers (Ollama, LM Studio) need no keys; ensure the app is running on its default port.
+</details>
+
+---
+
+## API (library)
+
+<details>
+<summary><strong>aiFactory (singleton)</strong></summary>
+
+- `generate(prompt, options?)` → `Promise<string>`
+- `process(request)` → `Promise<AIResponse>`
+- `getAvailableProviders()` → `string[]`
+- `getProvider(id)` → `AIProvider | null`
+- `getAllProviders()` → `AIProvider[]`
+- `getAllSupportedModels()` → `string[]` (all models across providers)
+- `getProviderForModel(modelId)` → `AIProvider | null`
+- `testProviders()` → `Promise<Record<string, boolean>>` (connection status per provider)
+- `ready()` → `Promise<void>` (resolves when init is complete)
+</details>
+
+<details>
+<summary><strong>AIFactory (custom config)</strong></summary>
+
+Create a factory with default provider, fallback, order, logger, or custom providers:
 
 ```typescript
-import { AIFactory, AIRequest } from 'bot-client';
+import { AIFactory } from '@tanvoid0/bot-client';
 
-// Create a custom factory with specific configuration
-const customFactory = new AIFactory({
-  defaultProvider: 'openai',
-  fallbackProvider: 'ollama'
+const factory = new AIFactory({
+  defaultProvider: 'ollama',
+  fallbackProvider: 'openai',
+  providerOrder: ['ollama', 'lmstudio', 'openai'],
+  logger: { info: console.log, warn: console.warn, error: console.error },
+  retries: 1
 });
+await factory.ready();
+const text = await factory.generate('Hello');
+```
 
-// Complex request with conversation history
-const request: AIRequest = {
-  prompt: "What should I do next?",
-  modelId: 'gpt-4',
-  systemPrompt: "You are a helpful coding assistant.",
-  history: [
-    { role: 'user', content: 'I want to build a web app' },
-    { role: 'assistant', content: 'Great! What kind of web app are you thinking of building?' }
+Use only specific providers (e.g. custom or pre-configured):
+
+```typescript
+import { AIFactory, OllamaProvider, OpenAIProvider } from '@tanvoid0/bot-client';
+
+const factory = new AIFactory({
+  providers: [
+    new OllamaProvider({ baseURL: 'http://localhost:11434' }),
+    new OpenAIProvider({ apiKey: process.env.MY_KEY })
   ],
-  maxTokens: 1000,
-  temperature: 0.7
-};
+  defaultProvider: 'ollama'
+});
+```
+</details>
 
-const response = await customFactory.process(request);
+<details>
+<summary><strong>Ollama provider (programmatic)</strong></summary>
 
-if (response.success) {
-  console.log('Response:', response.data);
-  console.log('Model used:', response.modelUsed);
-  console.log('Provider:', response.providerId);
-  console.log('Processing time:', response.processingTime, 'ms');
-  console.log('Confidence:', response.confidence);
-  console.log('Capabilities:', response.modelCapabilities);
-  console.log('Suggestions:', response.suggestedImprovements);
+Use the Ollama provider for API-first operations (fallback to `ollama` CLI when server is down):
+
+```typescript
+import { aiFactory, OllamaProvider } from '@tanvoid0/bot-client';
+
+const ollama = aiFactory.getProvider('ollama') as OllamaProvider | null;
+if (ollama) {
+  const list = await ollama.list();   // list models
+  await ollama.pull('llama3.1:8b');   // pull model
+  const info = await ollama.show('llama3.1:8b');
+  const out = await ollama.run('llama3.1:8b', 'Hello');
 }
 ```
 
-## Configuration
-
-### Provider Configuration
-
-Each provider can be configured with optional parameters:
+Or instantiate with custom base URL / CLI path:
 
 ```typescript
-// OpenAI Configuration
-const openaiConfig = {
-  apiKey: 'your-api-key',
-  baseURL: 'https://api.openai.com', // Optional
-  supportedModels: ['gpt-4', 'gpt-3.5-turbo'], // Optional
-  timeout: 30000, // Optional
-  retries: 3 // Optional
-};
-
-// Ollama Configuration
-const ollamaConfig = {
-  host: 'localhost', // Optional, defaults to localhost
-  port: 11434, // Optional, defaults to 11434
-  supportedModels: ['llama2', 'mistral'], // Optional, will auto-discover
-  timeout: 30000, // Optional
-  retries: 3 // Optional
-};
-
-// LM Studio Configuration
-const lmstudioConfig = {
-  host: 'localhost', // Optional, defaults to localhost
-  port: 1234, // Optional, defaults to 1234
-  supportedModels: ['local-model'], // Optional, will auto-discover
-  timeout: 30000, // Optional
-  retries: 3 // Optional
-};
+const provider = new OllamaProvider({
+  baseURL: 'http://localhost:11434',
+  ollamaExecutablePath: 'ollama',
+  preferCLI: false  // true = always use CLI
+});
+await provider.pull('gemma3');
 ```
+</details>
 
-### Factory Configuration
+<details>
+<summary><strong>Standalone Ollama CLI helper</strong></summary>
 
 ```typescript
-const factoryConfig = {
-  defaultProvider: 'openai',
-  fallbackProvider: 'ollama',
-  providers: {
-    // Custom providers can be added here
-  }
-};
+import { runOllamaCLI, isOllamaCLIAvailable } from '@tanvoid0/bot-client';
 
-const factory = new AIFactory(factoryConfig);
+const ok = await isOllamaCLIAvailable();
+const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => process.stderr.write(c) });
+// result: { ok, code, stdout, stderr }
 ```
+</details>
 
-## API Reference
+<details>
+<summary><strong>Types</strong></summary>
 
-### AIFactory
+- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `metadata?`, `usageContext?`
+- **AIResponse**: `success`, `data?`, `error?`, `modelUsed?`, `providerId?`, `processingTime?`, `confidence?`, `tokensUsed?`, `cost?`
+- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `providerOrder?`, `logger?`, `providers?`, `retries?`
+- **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
+- **AIError**: `message`, `provider`, `statusCode?`, `details?`, `code?` (e.g. `NO_API_KEY`, `RATE_LIMIT`)
+- **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`
+</details>
 
-The main class for managing AI providers and processing requests.
+---
 
-#### Methods
+## Providers
 
-- `generate(prompt: string, options?: Partial<AIRequest>): Promise<string>` - Simple text generation
-- `process(request: EnhancedAIRequest): Promise<EnhancedAIResponse>` - Process requests with enhanced metadata
-- `getAvailableProviders(): string[]` - Get list of available providers
-- `testProviders(): Promise<Record<string, boolean>>` - Test all provider connections
-- `getAllSupportedModels(): string[]` - Get all supported models across providers
-- `getProviderForModel(modelId: string): AIProvider | null` - Find provider for specific model
+| Provider | Type | Notes |
+|---------|------|--------|
+| **Ollama** | Local | API + CLI; list/pull/rm/show/ps/run; tested |
+| **LM Studio** | Local | localhost:1234; tested |
+| **OpenAI** | Cloud | API key required |
+| **Anthropic** | Cloud | API key required |
+| **Gemini** | Cloud | API key required; tested |
 
-### Types
+The factory initializes all providers and keeps those that pass the connection test. Use `getProvider('ollama')` (etc.) to use a specific one.
 
-#### AIRequest
+---
+
+## Troubleshooting
+
+<details>
+<summary><strong>No AI providers available</strong></summary>
+
+- **Ollama**: `curl http://localhost:11434/api/tags` or `ollama list`; start with `ollama serve` if needed.
+- **LM Studio**: Ensure a model is loaded and the server is on (e.g. localhost:1234).
+- **Cloud**: Ensure the right env key is set (`BOT_CLIENT_OPENAI_KEY`, etc.).
+</details>
+
+<details>
+<summary><strong>Connection test failed for X</strong></summary>
+
+Normal during init: the client keeps only providers that succeed. Missing API key or stopped local server will show as failed for that provider.
+</details>
+
+<details>
+<summary><strong>Use a specific provider</strong></summary>
+
 ```typescript
-interface AIRequest {
-  prompt: string;
-  modelId?: string;
-  temperature?: number;
-  maxTokens?: number;
-  systemPrompt?: string;
-  history?: ConversationHistory[];
-  metadata?: Record<string, any>;
+const provider = aiFactory.getProvider('ollama');
+if (provider) {
+  const res = await provider.process({ prompt: 'Hello', modelId: 'llama3.1:8b' });
 }
 ```
+</details>
 
-#### EnhancedAIResponse
-```typescript
-interface EnhancedAIResponse extends AIResponse {
-  processingTime?: number;
-  modelCapabilities?: string[];
-  suggestedImprovements?: string[];
-  confidence?: number;
-}
-```
-
-#### AIError
-```typescript
-class AIError extends Error {
-  constructor(
-    message: string,
-    provider: string,
-    statusCode?: number,
-    details?: any
-  );
-}
-```
-
-## Error Handling
-
-The package provides comprehensive error handling with the `AIError` class:
-
-```typescript
-import { AIError } from 'bot-client';
-
-try {
-  const response = await aiFactory.generate("Hello world");
-} catch (error) {
-  if (error instanceof AIError) {
-    console.error(`Error from ${error.provider}:`, error.message);
-    console.error('Status code:', error.statusCode);
-    console.error('Details:', error.details);
-  }
-}
-```
-
-## Examples
-
-See the `examples/` directory for complete usage examples:
-
-- `basic-usage.ts` - Simple text generation and conversation
-- `multiple-providers.ts` - Working with multiple providers and custom configuration
-
-## Supported Models & Testing Status
-
-### ✅ Tested Providers
-
-#### Ollama (Local)
-- **Status**: ✅ Fully tested and working
-- **Models**: Auto-discovered (llama2, llama2:7b, llama2:13b, llama2:70b, codellama, mistral, gemma, qwen2, etc.)
-- **Features**: Dynamic model discovery, conversation history, cost calculation
-- **Tested Models**: llama3.1:8b, llama2:7b, codellama:7b
-
-#### LM Studio (Local)
-- **Status**: ✅ Fully tested and working
-- **Models**: Auto-discovered (depends on loaded models)
-- **Features**: Dynamic model discovery, conversation history
-- **Tested Models**: Various local models
-
-### ⚠️ Untested Providers (API Integration Complete)
-
-#### OpenAI
-- **Status**: ⚠️ API integration complete, **NOT TESTED** - needs API key for testing
-- **Models**: gpt-4, gpt-4-turbo, gpt-4o, gpt-4o-mini, gpt-3.5-turbo
-- **Features**: Full API support, cost calculation, conversation history
-- **Testing**: **NOT TESTED** - requires valid API key for validation
-
-#### Anthropic
-- **Status**: ⚠️ API integration complete, **NOT TESTED** - needs API key for testing
-- **Models**: claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
-- **Features**: Full API support, cost calculation, conversation history
-- **Testing**: **NOT TESTED** - requires valid API key for validation
-
-#### Google Gemini
-- **Status**: ✅ API integration complete, **FULLY TESTED** - working with valid API key
-- **Models**: gemini-1.5-pro-latest, gemini-1.5-flash, gemini-2.5-pro, gemini-2.0-flash (35+ models available)
-- **Features**: Full API support, dynamic model discovery, conversation history
-- **Testing**: ✅ **FULLY TESTED** - confirmed working with 35+ available models
-
-### 📋 Testing Notes
-
-- **Local Providers (Ollama, LM Studio)**: ✅ Fully tested with actual running instances
-- **Cloud Providers**: ✅ **Gemini fully tested**, OpenAI/Anthropic API integration complete but **NOT TESTED** - requires API keys for validation
-- **Dynamic Model Discovery**: ✅ Tested and working for Ollama, LM Studio, and Gemini
-- **Error Handling**: ✅ Tested for missing API keys, invalid URLs, and connection issues
-- **Environment Variables**: ✅ Tested with BOT_CLIENT_PROVIDER and BOT_CLIENT_XXX_KEY conventions
-- **Provider Selection**: ✅ Tested with custom factories and environment variable overrides
-
-### 🧪 How to Test Providers
-
-```bash
-# Test local providers (no API key needed)
-npm run test
-
-# Test cloud providers (requires API keys)
-export BOT_CLIENT_OPENAI_KEY="your-key"
-export BOT_CLIENT_ANTHROPIC_KEY="your-key" 
-export BOT_CLIENT_GEMINI_KEY="your-key"
-npm run test
-
-# Test specific provider
-export BOT_CLIENT_PROVIDER="ollama"
-node examples/basic-usage.js
-```
-
-### ⚠️ Warning Messages
-
-The package will display warning messages during initialization to inform you about the testing status of each provider:
-
-- **✅ Fully Tested**: `✅ [AIFactory] Ollama provider initialized (FULLY TESTED)`
-- **⚠️ Untested**: `⚠️ [AIFactory] OpenAI provider initialized (NOT TESTED - API integration complete)`
-
-These warnings help you understand which providers have been validated and which ones may need additional testing with your specific setup.
+---
 
 ## Development
 
 ```bash
-# Install dependencies
-npm install
-
-# Build the package
-npm run build
-
-# Run tests
-npm test
-
-# Run linting
-npm run lint
-
-# Generate documentation
-npm run docs
-
-# Run unit tests (CI/CD)
-npm test
-
-# Run integration tests (requires providers)
-npm run test:integration
-
-# Test package functionality (before publishing)
-npm run test:package
+npm install && npm run build && npm test
+npm run cli -- help
 ```
 
-## Publishing to npm
+See **examples/** for more usage.
 
-This project includes automated publishing workflows and manual publishing scripts.
-
-### 🚀 **Automated Publishing (Recommended)**
-
-The project uses GitHub Actions for automated publishing:
-
-1. **Create a Release**: Go to GitHub → Releases → "Create a new release"
-2. **Tag Version**: Use semantic versioning (e.g., `v1.0.2`)
-3. **Publish**: The CI/CD pipeline will automatically:
-   - ✅ Run all tests
-   - ✅ Build the package
-   - ✅ Publish to npm
-   - ✅ Create GitHub release
-
-### 🔧 **Manual Publishing**
-
-Use the provided publish scripts for manual publishing:
-
-```bash
-# Dry run (build and test only)
-npm run publish:dry
-
-# Publish patch version (1.0.1 → 1.0.2)
-npm run publish:patch
-
-# Publish minor version (1.0.1 → 1.1.0)
-npm run publish:minor
-
-# Publish major version (1.0.1 → 2.0.0)
-npm run publish:major
-```
-
-### 📋 **Prerequisites**
-
-Before publishing, ensure you have:
-
-1. **npm Account**: Create an account at [npmjs.com](https://www.npmjs.com)
-2. **npm Login**: Run `npm login` locally
-3. **GitHub Secrets**: Set up `NPM_TOKEN` in GitHub repository secrets
-4. **Package Name**: Ensure the package name is unique (currently: `@tanvoid0/bot-client`)
-
-### 🔐 **Setting up NPM_TOKEN**
-
-1. **Generate Token**: Go to npm → Account → Access Tokens → Generate New Token
-2. **GitHub Secret**: Go to your GitHub repo → Settings → Secrets → New repository secret
-3. **Name**: `NPM_TOKEN`ck
-4. **Value**: Your npm access token
-
-### 📦 **Package Configuration**
-
-The package is configured with:
-- **Name**: `@tanvoid0/bot-client` (unique, descriptive)
-- **Files**: Only `dist/`, `README.md`, and `LICENSE` are published
-- **Access**: Public package
-- **Pre-publish**: Automatic build and test execution
-
-### 🎯 **Version Management**
-
-The project follows semantic versioning:
-- **Patch** (1.0.1 → 1.0.2): Bug fixes
-- **Minor** (1.0.1 → 1.1.0): New features, backward compatible
-- **Major** (1.0.1 → 2.0.0): Breaking changes
-
-### 📊 **Publishing Checklist**
-
-Before publishing, verify:
-- ✅ All tests pass (`npm test`)
-- ✅ Build succeeds (`npm run build`)
-- ✅ Linting passes (`npm run lint`)
-- ✅ Documentation is up to date
-- ✅ README is accurate
-- ✅ Package name is unique
-- ✅ Version number is appropriate
-
-## CI/CD Pipeline
-
-This project uses GitHub Actions for continuous integration and deployment:
-
-### 🤖 **Automated Workflows**
-
-- **CI/CD Pipeline**: Runs on every push and pull request
-  - ✅ Multi-Node.js version testing (16.x, 18.x, 20.x)
-  - ✅ Build verification
-  - ✅ Test execution
-  - ✅ Linting checks
-  - ✅ Package functionality tests
-
-- **Security Audit**: 
-  - ✅ Dependency vulnerability scanning
-  - ✅ Secret detection with TruffleHog
-  - ✅ Automated security fixes
-
-- **Automated Publishing**:
-  - ✅ npm package publishing on release
-  - ✅ GitHub Pages documentation deployment
-  - ✅ Version management
-
-- **Dependency Updates**:
-  - ✅ Weekly dependency updates
-  - ✅ Automated pull request creation
-  - ✅ Security audit after updates
-
-### 🛡️ **Quality Gates**
-
-All changes must pass:
-- ✅ Build compilation
-- ✅ Unit tests
-- ✅ Integration tests
-- ✅ Linting standards
-- ✅ Security audit
-- ✅ Package functionality tests
-
-### 📊 **Status Badges**
-
-The badges above show real-time status of:
-- **CI/CD Pipeline**: Build and test status
-- **npm Version**: Current package version
-- **npm Downloads**: Package popularity
-- **License**: MIT license compliance
-- **TypeScript**: Type safety
-- **Node.js**: Runtime compatibility
-- **Security**: Security audit status
-- **Test Coverage**: Test coverage percentage
+---
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT

@@ -11,6 +11,7 @@
     "^(\\.{1,2}/.*)\\.js$": "$1"
   },
   "testMatch": [
-    "**/tests/unit-tests.ts"
+    "**/tests/unit-tests.ts",
+    "**/tests/integration-local.ts"
   ]
 }

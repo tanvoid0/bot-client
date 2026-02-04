@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Client React Demo</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .chat-container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #fafafa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+        }
+        
+        .message.user {
+            justify-content: flex-end;
+        }
+        
+        .message.assistant {
+            justify-content: flex-start;
+        }
+        
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+        }
+        
+        .message.user .message-content {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .message.assistant .message-content {
+            background-color: #e0e0e0;
+            color: black;
+        }
+        
+        .message-time {
+            font-size: 11px;
+            opacity: 0.7;
+            text-align: right;
+            margin-top: 5px;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .loading-content {
+            padding: 12px 16px;
+            border-radius: 18px;
+            background-color: #e0e0e0;
+            color: #666;
+            display: flex;
+            align-items: center;
+        }
+        
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ccc;
+            border-top: 2px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        .error {
+            padding: 12px 16px;
+            background-color: #ffebee;
+            color: #c62828;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ffcdd2;
+        }
+        
+        .input-area {
+            padding: 20px;
+            background-color: white;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .input-field {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            resize: vertical;
+            min-height: 50px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        .send-button {
+            padding: 12px 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .send-button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .clear-button {
+            padding: 12px 16px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .status h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        
+        .status-info {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // AI Client that uses the web server API
+        const aiClient = {
+            baseUrl: window.location.origin,
+            
+            async generate(prompt, options = {}) {
+                try {
+                    const response = await fetch(`${this.baseUrl}/api/generate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            prompt,
+                            options: {
+                                provider: options.provider,
+                                modelId: options.model,
+                                maxTokens: options.maxTokens || 500,
+                                temperature: options.temperature || 0.7
+                            }
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        return data.data;
+                    } else {
+                        throw new Error(data.error || 'Failed to generate response');
+                    }
+                } catch (error) {
+                    console.error('AI Client error:', error);
+                    throw error;
+                }
+            },
+            
+            async getAvailableProviders() {
+                try {
+                    const response = await fetch(`${this.baseUrl}/api/status`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    return data.providers || [];
+                } catch (error) {
+                    console.error('Failed to get providers:', error);
+                    return [];
+                }
+            }
+        };
+
+        function AIReactExample() {
+            const [messages, setMessages] = useState([]);
+            const [inputText, setInputText] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [availableProviders, setAvailableProviders] = useState([]);
+            const [selectedProvider, setSelectedProvider] = useState('');
+            const [selectedModel, setSelectedModel] = useState('');
+            const [error, setError] = useState(null);
+
+            useEffect(() => {
+                const initializeProviders = async () => {
+                    try {
+                        const providers = await aiClient.getAvailableProviders();
+                        setAvailableProviders(providers);
+                        
+                        // Set default provider and model
+                        if (providers.length > 0) {
+                            setSelectedProvider(providers[0].id);
+                            if (providers[0].models.length > 0) {
+                                setSelectedModel(providers[0].models[0]);
+                            }
+                        }
+                        
+                        setMessages([{
+                            id: '1',
+                            text: `Hello! I'm your AI assistant. Available providers: ${providers.map(p => p.name).join(', ')}`,
+                            isUser: false,
+                            timestamp: new Date()
+                        }]);
+                    } catch (error) {
+                        console.error('Failed to initialize providers:', error);
+                        setError('Failed to load AI providers');
+                    }
+                };
+                
+                initializeProviders();
+            }, []);
+
+            const sendMessage = async () => {
+                if (!inputText.trim() || isLoading) return;
+
+                const userMessage = {
+                    id: Date.now().toString(),
+                    text: inputText,
+                    isUser: true,
+                    timestamp: new Date(),
+                    provider: selectedProvider,
+                    model: selectedModel
+                };
+
+                setMessages(prev => [...prev, userMessage]);
+                setInputText('');
+                setIsLoading(true);
+                setError(null);
+
+                try {
+                    const response = await aiClient.generate(inputText, {
+                        provider: selectedProvider,
+                        model: selectedModel,
+                        maxTokens: 500,
+                        temperature: 0.7
+                    });
+
+                    const aiMessage = {
+                        id: (Date.now() + 1).toString(),
+                        text: response,
+                        isUser: false,
+                        timestamp: new Date(),
+                        provider: selectedProvider,
+                        model: selectedModel
+                    };
+
+                    setMessages(prev => [...prev, aiMessage]);
+                } catch (err) {
+                    setError(err.message || 'Failed to get AI response');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const handleProviderChange = (providerId) => {
+                setSelectedProvider(providerId);
+                const provider = availableProviders.find(p => p.id === providerId);
+                if (provider && provider.models.length > 0) {
+                    setSelectedModel(provider.models[0]);
+                } else {
+                    setSelectedModel('');
+                }
+            };
+
+            const handleModelChange = (modelId) => {
+                setSelectedModel(modelId);
+            };
+
+            const getCurrentProvider = () => {
+                return availableProviders.find(p => p.id === selectedProvider);
+            };
+
+            const handleKeyPress = (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            };
+
+            const clearChat = () => {
+                setMessages([]);
+                setError(null);
+            };
+
+            return (
+                <div className="container">
+                    <div className="chat-container">
+                        <div className="header">
+                            <h1>🤖 AI Client Demo</h1>
+                            <p>Available Providers: {availableProviders.length > 0 ? availableProviders.map(p => p.name).join(', ') : 'None'}</p>
+                        </div>
+
+                        {/* Provider and Model Selection */}
+                        <div style={{
+                            padding: '15px 20px',
+                            backgroundColor: '#f8f9fa',
+                            borderBottom: '1px solid #e0e0e0',
+                            display: 'flex',
+                            gap: '15px',
+                            alignItems: 'center',
+                            flexWrap: 'wrap'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <label style={{ fontWeight: 'bold', fontSize: '14px' }}>Provider:</label>
+                                <select
+                                    value={selectedProvider}
+                                    onChange={(e) => handleProviderChange(e.target.value)}
+                                    style={{
+                                        padding: '6px 10px',
+                                        border: '1px solid #ddd',
+                                        borderRadius: '4px',
+                                        fontSize: '14px',
+                                        minWidth: '120px'
+                                    }}
+                                >
+                                    {availableProviders.map(provider => (
+                                        <option key={provider.id} value={provider.id}>
+                                            {provider.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <label style={{ fontWeight: 'bold', fontSize: '14px' }}>Model:</label>
+                                <select
+                                    value={selectedModel}
+                                    onChange={(e) => handleModelChange(e.target.value)}
+                                    disabled={!selectedProvider}
+                                    style={{
+                                        padding: '6px 10px',
+                                        border: '1px solid #ddd',
+                                        borderRadius: '4px',
+                                        fontSize: '14px',
+                                        minWidth: '150px',
+                                        opacity: selectedProvider ? 1 : 0.6
+                                    }}
+                                >
+                                    {getCurrentProvider()?.models.map(model => (
+                                        <option key={model} value={model}>
+                                            {model}
+                                        </option>
+                                    )) || <option>No models available</option>}
+                                </select>
+                            </div>
+
+                            <div style={{ 
+                                fontSize: '12px', 
+                                color: '#666',
+                                marginLeft: 'auto'
+                            }}>
+                                {selectedProvider && selectedModel && (
+                                    <span>Using: <strong>{getCurrentProvider()?.name}</strong> - <strong>{selectedModel}</strong></span>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="messages">
+                            {messages.map((message) => (
+                                <div key={message.id} className={`message ${message.isUser ? 'user' : 'assistant'}`}>
+                                    <div className="message-content">
+                                        <div>{message.text}</div>
+                                        <div className="message-time">
+                                            {message.timestamp.toLocaleTimeString()}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            
+                            {isLoading && (
+                                <div className="loading">
+                                    <div className="loading-content">
+                                        <div className="spinner"></div>
+                                        AI is thinking...
+                                    </div>
+                                </div>
+                            )}
+
+                            {error && (
+                                <div className="error">
+                                    <strong>Error:</strong> {error}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="input-area">
+                            <div className="input-container">
+                                <textarea
+                                    value={inputText}
+                                    onChange={(e) => setInputText(e.target.value)}
+                                    onKeyPress={handleKeyPress}
+                                    placeholder="Type your message here..."
+                                    disabled={isLoading}
+                                    className="input-field"
+                                />
+                                <button
+                                    onClick={sendMessage}
+                                    disabled={!inputText.trim() || isLoading}
+                                    className="send-button"
+                                >
+                                    {isLoading ? 'Sending...' : 'Send'}
+                                </button>
+                                <button
+                                    onClick={clearChat}
+                                    className="clear-button"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="status">
+                        <h3>📊 Status</h3>
+                        <div className="status-info">
+                            <div><strong>Available Providers:</strong> {availableProviders.length}</div>
+                            <div><strong>Messages:</strong> {messages.length}</div>
+                            <div><strong>Status:</strong> {isLoading ? 'Processing...' : 'Ready'}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AIReactExample />, document.getElementById('root'));
+    </script>
+</body>
+</html>

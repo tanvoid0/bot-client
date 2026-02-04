@@ -1,115 +1,82 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { AIProvider, AIRequest, AIResponse, AIProviderConfig, AIError } from '../types/index.js';
+import axios, { AxiosInstance } from 'axios';
+import { AIProvider, AIRequest, AIResponse, AIError } from '../types/index.js';
+
+/** Build OpenAI-style messages array from request (systemPrompt + history + current prompt). */
+export function buildChatMessages(request: AIRequest): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+  if (request.systemPrompt) {
+    messages.push({ role: 'system', content: request.systemPrompt });
+  }
+  if (request.history?.length) {
+    for (const h of request.history) {
+      if (h.role === 'system' || h.role === 'user' || h.role === 'assistant') {
+        messages.push({ role: h.role, content: h.content });
+      }
+    }
+  }
+  messages.push({ role: 'user', content: request.prompt });
+  return messages;
+}
 
 export abstract class BaseProvider implements AIProvider {
   protected client!: AxiosInstance;
-  protected config: AIProviderConfig;
-  private _clientInitialized = false;
+  protected _supportedModels: string[] = [];
 
-  constructor(config: AIProviderConfig) {
-    this.config = config;
-    // Don't create client in constructor to avoid order issues
+  constructor() {
+    // Simple initialization
   }
 
   abstract get providerId(): string;
   abstract get providerName(): string;
-  abstract get supportedModels(): string[];
+  abstract process(request: AIRequest): Promise<AIResponse>;
+  abstract discoverModels(): Promise<string[]>;
 
-  protected createClient(): AxiosInstance {
-    const axiosConfig: AxiosRequestConfig = {
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    };
-
-    return axios.create(axiosConfig);
+  get supportedModels(): string[] {
+    return this._supportedModels;
   }
-
-  protected getClient(): AxiosInstance {
-    if (!this._clientInitialized) {
-      this.client = this.createClient();
-      this._clientInitialized = true;
-    }
-    return this.client;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  abstract process(_request: AIRequest): Promise<AIResponse>;
 
   isModelSupported(modelId: string): boolean {
     return this.supportedModels.includes(modelId);
   }
 
-  getDefaultConfig(): AIProviderConfig {
-    return this.config;
-  }
-
   async testConnection(): Promise<boolean> {
     try {
-      const testRequest: AIRequest = {
-        prompt: 'Hello',
-        modelId: this.config.defaultModel,
-        maxTokens: 10
-      };
-      
-      const response = await this.process(testRequest);
-      return response.success;
-    } catch (error) {
+      const response = await this.process({ prompt: 'Hello', maxTokens: 10 });
+      const hasData = response.data === '' || (typeof response.data === 'string' && response.data.length > 0);
+      return response.success && hasData;
+    } catch {
       return false;
     }
   }
 
-  protected handleError(error: any, operation: string): never {
-    const statusCode = error.response?.status;
-    const message = error.response?.data?.error?.message || error.message || 'Unknown error';
-    
-    throw new AIError(
-      `${operation} failed: ${message}`,
-      this.providerName,
-      statusCode,
-      error.response?.data
-    );
+  protected createClient(baseURL?: string, options?: { headers?: Record<string, string> }): AxiosInstance {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (options?.headers) {
+      Object.assign(headers, options.headers);
+    }
+    const client = axios.create({
+      timeout: 30000,
+      headers,
+      ...(baseURL && { baseURL })
+    });
+    return client;
   }
 
-  protected getDefaultModel(): string {
-    return this.config.defaultModel;
+  protected handleError(error: unknown, operation: string): never {
+    const err = error as { response?: { data?: { error?: { message?: string } } }; message?: string };
+    const message = err.response?.data?.error?.message || err.message || 'Unknown error';
+    throw new AIError(`${operation} failed: ${message}`, this.providerId);
   }
 
-  protected mergeRequestOptions(request: AIRequest): AIRequest {
+  protected createResponse(success: boolean, data?: string, error?: string, modelUsed?: string): AIResponse {
     return {
-      ...request,
-      modelId: request.modelId || this.config.defaultModel,
-      maxTokens: request.maxTokens || this.config.defaultMaxTokens,
-      temperature: request.temperature ?? this.config.defaultTemperature
-    };
-  }
-
-  protected createSuccessResponse(data: string, modelUsed: string, tokensUsed?: number, cost?: number): AIResponse {
-    const response: AIResponse = {
-      success: true,
+      success,
       data,
-      modelUsed,
-      providerId: this.providerId
-    };
-
-    if (tokensUsed !== undefined) {
-      response.tokensUsed = tokensUsed;
-    }
-
-    if (cost !== undefined) {
-      response.cost = cost;
-    }
-
-    return response;
-  }
-
-  protected createErrorResponse(error: string, modelUsed: string): AIResponse {
-    return {
-      success: false,
       error,
-      modelUsed,
-      providerId: this.providerId
+      modelUsed: modelUsed || this.supportedModels[0] || 'unknown',
+      providerId: this.providerId,
+      processingTime: 0,
+      confidence: success ? 0.8 : 0
     };
   }
 }

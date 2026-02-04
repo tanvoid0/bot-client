@@ -1,34 +1,60 @@
-import {
-  AIRequest,
-  AIResponse,
-  AIProviderConfig
-} from '../types/index.js';
-import { BaseProvider } from './base-provider.js';
+import axios, { AxiosInstance } from 'axios';
+import { AIRequest, AIResponse } from '../types/index.js';
+import { BaseProvider, buildChatMessages } from './base-provider.js';
 
-export interface GeminiConfig {
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com';
+
+export interface GeminiProviderConfig {
   apiKey?: string;
-  baseURL?: string;
-  supportedModels?: string[];
-  timeout?: number;
-  retries?: number;
 }
 
 export class GeminiProvider extends BaseProvider {
   private apiKey?: string;
-  private baseURL: string;
-  private _supportedModels: string[] = [];
+  private _client: AxiosInstance | null = null;
 
-  constructor(
-    config: AIProviderConfig, 
-    geminiConfig?: GeminiConfig
-  ) {
-    super(config);
-    this.apiKey = geminiConfig?.apiKey;
-    this.baseURL = geminiConfig?.baseURL || 'https://generativelanguage.googleapis.com';
-    
-    // Initialize supported models from config or fallback to defaults
-    if (geminiConfig?.supportedModels) {
-      this._supportedModels = geminiConfig.supportedModels;
+  constructor(config?: GeminiProviderConfig) {
+    super();
+    this.apiKey = config?.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.BOT_CLIENT_GEMINI_KEY;
+  }
+
+  private getClient(): AxiosInstance {
+    if (this._client) return this._client;
+    this._client = axios.create({
+      baseURL: GEMINI_BASE,
+      timeout: 30000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return this._client;
+  }
+
+  async testConnection(): Promise<boolean> {
+    if (!this.apiKey) return false;
+    try {
+      const client = this.getClient();
+      await client.get('/v1beta/models', { params: { key: this.apiKey } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async discoverModels(): Promise<string[]> {
+    if (!this.apiKey) return [];
+
+    try {
+      const client = this.getClient();
+      const response = await client.get('/v1beta/models', {
+        params: { key: this.apiKey }
+      });
+      
+      const models = response.data.models || [];
+      this._supportedModels = models
+        .filter((model: any) => model.name.includes('gemini'))
+        .map((model: any) => model.name.split('/').pop());
+      
+      return this._supportedModels;
+    } catch (error) {
+      return [];
     }
   }
 
@@ -40,119 +66,47 @@ export class GeminiProvider extends BaseProvider {
     return 'Google Gemini';
   }
 
-  get supportedModels(): string[] {
-    return this._supportedModels.length > 0 ? this._supportedModels : this.config.supportedModels;
-  }
 
   async process(request: AIRequest): Promise<AIResponse> {
-    try {
-      if (!this.apiKey) {
-        throw new Error('Gemini API key is required');
-      }
+    if (!this.apiKey) {
+      return this.createResponse(false, undefined, 'Gemini API key required');
+    }
 
-      const mergedRequest = this.mergeRequestOptions(request);
-      
+    try {
       const client = this.getClient();
-      const response = await client.post(`/v1beta/models/${mergedRequest.modelId}:generateContent`, {
-        contents: this.buildContents(mergedRequest),
+      const modelId = request.modelId ?? this.supportedModels[0] ?? 'gemini-1.5-pro';
+      const messages = buildChatMessages(request);
+      const systemParts: Array<{ text: string }> = [];
+      const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+      for (const m of messages) {
+        if (m.role === 'system') {
+          systemParts.push({ text: m.content });
+        } else {
+          contents.push({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+          });
+        }
+      }
+      const body: Record<string, unknown> = {
+        contents,
         generationConfig: {
-          maxOutputTokens: mergedRequest.maxTokens,
-          temperature: mergedRequest.temperature,
-          topP: 0.8,
-          topK: 40
+          maxOutputTokens: request.maxTokens ?? 1000,
+          temperature: request.temperature ?? 0.7
         }
-      }, {
-        params: {
-          key: this.apiKey
-        }
+      };
+      if (systemParts.length > 0) {
+        body.systemInstruction = { parts: systemParts };
+      }
+      const response = await client.post(`/v1beta/models/${modelId}:generateContent`, body, {
+        params: { key: this.apiKey }
       });
 
-      const data = response.data;
-      const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const usage = data.usageMetadata;
-
-      return this.createSuccessResponse(
-        content,
-        mergedRequest.modelId,
-        usage?.totalTokenCount
-      );
-
+      const content = response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const modelUsed = request.modelId ?? modelId;
+      return this.createResponse(true, content, undefined, modelUsed);
     } catch (error) {
       this.handleError(error, 'Gemini processing');
     }
-  }
-
-  async testConnection(): Promise<boolean> {
-    try {
-      if (!this.apiKey) {
-        return false;
-      }
-      // Try to get available models
-      await this.fetchAvailableModels();
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async fetchAvailableModels(): Promise<string[]> {
-    try {
-      if (!this.apiKey) {
-        return this.config.supportedModels;
-      }
-
-      const client = this.getClient();
-      const response = await client.get('/v1beta/models', {
-        params: {
-          key: this.apiKey
-        }
-      });
-      
-      const models = response.data.models || [];
-      this._supportedModels = models
-        .filter((model: any) => model.name.includes('gemini'))
-        .map((model: any) => model.name.split('/').pop());
-      
-      return this._supportedModels;
-    } catch (error) {
-      // Fallback to configured models if API call fails
-      return this.config.supportedModels;
-    }
-  }
-
-  protected override createClient() {
-    const client = super.createClient();
-    client.defaults.baseURL = this.baseURL;
-    return client;
-  }
-
-  private buildContents(request: AIRequest): Array<{ role: string; parts: Array<{ text: string }> }> {
-    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-
-    // Add system prompt if provided
-    if (request.systemPrompt) {
-      contents.push({
-        role: 'user',
-        parts: [{ text: request.systemPrompt }]
-      });
-    }
-
-    // Add conversation history
-    if (request.history && request.history.length > 0) {
-      request.history.forEach(msg => {
-        contents.push({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: msg.content }]
-        });
-      });
-    }
-
-    // Add current prompt
-    contents.push({
-      role: 'user',
-      parts: [{ text: request.prompt }]
-    });
-
-    return contents;
   }
 }
