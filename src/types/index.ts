@@ -4,12 +4,10 @@ export interface AIProvider {
   readonly providerName: string;
   readonly supportedModels: string[];
   
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  process(_request: AIRequest): Promise<AIResponse>;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  isModelSupported(_modelId: string): boolean;
-  getDefaultConfig(): AIProviderConfig;
+  process(request: AIRequest): Promise<AIResponse>;
+  isModelSupported(modelId: string): boolean;
   testConnection(): Promise<boolean>;
+  discoverModels(): Promise<string[]>;
 }
 
 // Base AI Request Interface
@@ -42,6 +40,11 @@ export interface AIResponse {
   modelCapabilities?: string[];
   suggestedImprovements?: string[];
   confidence?: number;
+  // Additional metadata for complete data
+  requestId?: string;
+  timestamp?: Date;
+  retryCount?: number;
+  fallbackUsed?: boolean;
 }
 
 // Conversation History
@@ -53,17 +56,34 @@ export interface ConversationHistory {
 
 // AI Provider Configuration
 export interface AIProviderConfig {
-  defaultModel: string;
-  defaultTemperature: number;
-  defaultMaxTokens: number;
-  supportedModels: string[];
+  defaultModel?: string;
+  defaultTemperature?: number;
+  defaultMaxTokens?: number;
+  supportedModels?: string[];
 }
 
-// AI Factory Configuration
+// Optional logger for factory and providers (all methods optional)
+export interface Logger {
+  debug?(message: string, ...args: unknown[]): void;
+  info?(message: string, ...args: unknown[]): void;
+  warn?(message: string, ...args: unknown[]): void;
+  error?(message: string, ...args: unknown[]): void;
+}
+
+// AI Factory Configuration (constructor options)
 export interface AIFactoryConfig {
-  defaultProvider: string;
-  providers: Record<string, AIProvider>;
+  /** Preferred provider when no modelId is specified */
+  defaultProvider?: string;
+  /** Fallback provider if default fails */
   fallbackProvider?: string;
+  /** Order of providers to try when no default/model match (first available wins) */
+  providerOrder?: string[];
+  /** Optional logger; if not set, no logging */
+  logger?: Logger;
+  /** Custom provider instances; if set, only these are used (no built-in list) */
+  providers?: AIProvider[];
+  /** Max retries per request on failure (default 0). */
+  retries?: number;
 }
 
 // Provider Types
@@ -124,14 +144,23 @@ export interface PostProcessingOptions {
   keywordExtraction?: boolean;
 }
 
+// Error codes for programmatic handling
+export type AIErrorCode =
+  | 'NO_API_KEY'
+  | 'NO_PROVIDERS'
+  | 'RATE_LIMIT'
+  | 'NETWORK_ERROR'
+  | 'INVALID_RESPONSE'
+  | 'UNKNOWN';
+
 // Error Types
 export class AIError extends Error {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(
     message: string,
     public provider: string,
     public statusCode?: number,
-    public details?: any
+    public details?: unknown,
+    public code?: AIErrorCode
   ) {
     super(message);
     this.name = 'AIError';

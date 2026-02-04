@@ -1,4 +1,4 @@
-import { AIFactory, aiFactory } from '../dist/index.js';
+import { AIFactory, aiFactory, ensureFactoryReady } from '../dist/index.js';
 
 /**
  * Basic Usage Example
@@ -14,8 +14,7 @@ import { AIFactory, aiFactory } from '../dist/index.js';
 async function basicUsageExample() {
   console.log('🤖 AI Model Manager - Basic Usage Example\n');
 
-  // Wait for AIFactory to initialize
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await ensureFactoryReady();
 
   try {
     // 0. Environment variable configuration
@@ -85,12 +84,9 @@ async function basicUsageExample() {
     // 7. Custom factory with specific provider
     console.log('7️⃣ Custom Factory with Specific Provider:');
     const customFactory = new AIFactory({
-      defaultProvider: 'ollama' // Override environment variable
+      defaultProvider: 'ollama'
     });
-    
-    // Wait for custom factory initialization
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
+    await customFactory.ready();
     const customResponse = await customFactory.generate('Hello from custom factory!');
     console.log('Custom Factory Response:', customResponse);
     console.log('---\n');

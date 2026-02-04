@@ -1,29 +1,39 @@
-import {
-  AIRequest,
-  AIResponse,
-  AIProviderConfig
-} from '../types/index.js';
-import { BaseProvider } from './base-provider.js';
+import axios, { AxiosInstance } from 'axios';
+import { AIRequest, AIResponse } from '../types/index.js';
+import { BaseProvider, buildChatMessages } from './base-provider.js';
 
-export interface AnthropicConfig {
+const ANTHROPIC_BASE = 'https://api.anthropic.com';
+
+export interface AnthropicProviderConfig {
   apiKey?: string;
-  baseURL?: string;
-  supportedModels?: string[];
-  timeout?: number;
-  retries?: number;
 }
 
 export class AnthropicProvider extends BaseProvider {
   private apiKey?: string;
-  private baseURL: string;
+  private _client: AxiosInstance | null = null;
 
-  constructor(
-    config: AIProviderConfig, 
-    anthropicConfig?: AnthropicConfig
-  ) {
-    super(config);
-    this.apiKey = anthropicConfig?.apiKey;
-    this.baseURL = anthropicConfig?.baseURL || 'https://api.anthropic.com';
+  constructor(config?: AnthropicProviderConfig) {
+    super();
+    this.apiKey = config?.apiKey ?? process.env.ANTHROPIC_API_KEY ?? process.env.BOT_CLIENT_ANTHROPIC_KEY;
+  }
+
+  private getClient(): AxiosInstance {
+    if (this._client) return this._client;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01'
+    };
+    if (this.apiKey) headers['x-api-key'] = this.apiKey;
+    this._client = axios.create({
+      baseURL: ANTHROPIC_BASE,
+      timeout: 30000,
+      headers
+    });
+    return this._client;
+  }
+
+  async discoverModels(): Promise<string[]> {
+    return [];
   }
 
   get providerId(): string {
@@ -34,78 +44,26 @@ export class AnthropicProvider extends BaseProvider {
     return 'Anthropic';
   }
 
-  get supportedModels(): string[] {
-    return this.config.supportedModels;
-  }
-
   async process(request: AIRequest): Promise<AIResponse> {
-    try {
-      if (!this.apiKey) {
-        throw new Error('Anthropic API key is required');
-      }
+    if (!this.apiKey) {
+      return this.createResponse(false, undefined, 'Anthropic API key required');
+    }
 
-      const mergedRequest = this.mergeRequestOptions(request);
-      
+    try {
       const client = this.getClient();
+      const messages = buildChatMessages(request);
       const response = await client.post('/v1/messages', {
-        model: mergedRequest.modelId,
-        messages: this.buildMessages(mergedRequest),
-        max_tokens: mergedRequest.maxTokens,
-        temperature: mergedRequest.temperature
+        model: request.modelId ?? 'claude-3-sonnet-20240229',
+        messages,
+        max_tokens: request.maxTokens ?? 1000,
+        temperature: request.temperature ?? 0.7
       });
 
-      const data = response.data;
-      const content = data.content?.[0]?.text || '';
-      const usage = data.usage;
-
-      return this.createSuccessResponse(
-        content,
-        mergedRequest.modelId,
-        (usage?.input_tokens || 0) + (usage?.output_tokens || 0),
-        this.calculateCost(usage?.input_tokens, usage?.output_tokens, mergedRequest.modelId)
-      );
-
+      const content = response.data.content?.[0]?.text ?? '';
+      const modelUsed = request.modelId ?? 'claude-3-sonnet-20240229';
+      return this.createResponse(true, content, undefined, modelUsed);
     } catch (error) {
       this.handleError(error, 'Anthropic processing');
     }
-  }
-
-  protected override createClient() {
-    const client = super.createClient();
-    client.defaults.baseURL = this.baseURL;
-    return client;
-  }
-
-  private buildMessages(request: AIRequest): Array<{ role: string; content: string }> {
-    const messages: Array<{ role: string; content: string }> = [];
-
-    // Anthropic doesn't use system messages in the same way, so we prepend to the first user message
-    let firstUserMessage = request.prompt;
-    if (request.systemPrompt) {
-      firstUserMessage = `${request.systemPrompt}\n\n${request.prompt}`;
-    }
-
-    if (request.history && request.history.length > 0) {
-      request.history.forEach(msg => {
-        messages.push({ 
-          role: msg.role === 'assistant' ? 'assistant' : 'user', 
-          content: msg.content 
-        });
-      });
-    }
-
-    messages.push({ role: 'user', content: firstUserMessage });
-
-    return messages;
-  }
-
-  private calculateCost(inputTokens?: number, outputTokens?: number, model?: string): number | undefined {
-    if (!inputTokens || !outputTokens || !model) return undefined;
-    
-    // Simplified cost calculation - can be enhanced with actual pricing
-    const inputCostPer1k = model.includes('claude-3-opus') ? 0.015 : 0.003;
-    const outputCostPer1k = model.includes('claude-3-opus') ? 0.075 : 0.015;
-    
-    return (inputTokens / 1000) * inputCostPer1k + (outputTokens / 1000) * outputCostPer1k;
   }
 }

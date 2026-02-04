@@ -1,29 +1,64 @@
-import {
-  AIRequest,
-  AIResponse,
-  AIProviderConfig
-} from '../types/index.js';
-import { BaseProvider } from './base-provider.js';
+import axios, { AxiosInstance } from 'axios';
+import { AIRequest, AIResponse } from '../types/index.js';
+import { BaseProvider, buildChatMessages } from './base-provider.js';
 
-export interface OpenAIConfig {
+const DEFAULT_OPENAI_BASE = 'https://api.openai.com';
+
+export interface OpenAIProviderConfig {
   apiKey?: string;
   baseURL?: string;
-  supportedModels?: string[];
-  timeout?: number;
-  retries?: number;
 }
 
 export class OpenAIProvider extends BaseProvider {
   private apiKey?: string;
   private baseURL: string;
+  private _client: AxiosInstance | null = null;
 
-  constructor(
-    config: AIProviderConfig, 
-    openaiConfig?: OpenAIConfig
-  ) {
-    super(config);
-    this.apiKey = openaiConfig?.apiKey;
-    this.baseURL = openaiConfig?.baseURL || 'https://api.openai.com';
+  constructor(config?: OpenAIProviderConfig) {
+    super();
+    this.apiKey = config?.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.BOT_CLIENT_OPENAI_KEY;
+    this.baseURL = config?.baseURL ?? DEFAULT_OPENAI_BASE;
+  }
+
+  private getClient(): AxiosInstance {
+    if (this._client) return this._client;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+    this._client = axios.create({
+      baseURL: this.baseURL,
+      timeout: 30000,
+      headers
+    });
+    return this._client;
+  }
+
+  async testConnection(): Promise<boolean> {
+    if (!this.apiKey) return false;
+    try {
+      const client = this.getClient();
+      await client.get('/v1/models');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async discoverModels(): Promise<string[]> {
+    if (!this.apiKey) return [];
+
+    try {
+      const client = this.getClient();
+      const response = await client.get('/v1/models');
+
+      const models = response.data.data || [];
+      this._supportedModels = models
+        .filter((m: { id?: string }) => m.id?.includes('gpt'))
+        .map((m: { id: string }) => m.id);
+
+      return this._supportedModels;
+    } catch {
+      return [];
+    }
   }
 
   get providerId(): string {
@@ -34,72 +69,25 @@ export class OpenAIProvider extends BaseProvider {
     return 'OpenAI';
   }
 
-  get supportedModels(): string[] {
-    return this.config.supportedModels;
-  }
-
   async process(request: AIRequest): Promise<AIResponse> {
-    try {
-      if (!this.apiKey) {
-        throw new Error('OpenAI API key is required');
-      }
+    if (!this.apiKey) {
+      return this.createResponse(false, undefined, 'OpenAI API key required');
+    }
 
-      const mergedRequest = this.mergeRequestOptions(request);
-      
+    try {
       const client = this.getClient();
+      const messages = buildChatMessages(request);
       const response = await client.post('/v1/chat/completions', {
-        model: mergedRequest.modelId,
-        messages: this.buildMessages(mergedRequest),
-        max_tokens: mergedRequest.maxTokens,
-        temperature: mergedRequest.temperature,
-        stream: false
+        model: request.modelId ?? this.supportedModels[0],
+        messages,
+        max_tokens: request.maxTokens ?? 1000,
+        temperature: request.temperature ?? 0.7
       });
 
-      const data = response.data;
-      const content = data.choices?.[0]?.message?.content || '';
-      const usage = data.usage;
-
-      return this.createSuccessResponse(
-        content,
-        mergedRequest.modelId,
-        usage?.total_tokens,
-        this.calculateCost(usage?.total_tokens, mergedRequest.modelId)
-      );
-
+      const content = response.data.choices?.[0]?.message?.content ?? '';
+      return this.createResponse(true, content, undefined, request.modelId);
     } catch (error) {
       this.handleError(error, 'OpenAI processing');
     }
-  }
-
-  protected override createClient() {
-    const client = super.createClient();
-    client.defaults.baseURL = this.baseURL;
-    return client;
-  }
-
-  private buildMessages(request: AIRequest): Array<{ role: string; content: string }> {
-    const messages: Array<{ role: string; content: string }> = [];
-
-    if (request.systemPrompt) {
-      messages.push({ role: 'system', content: request.systemPrompt });
-    }
-
-    if (request.history && request.history.length > 0) {
-      request.history.forEach(msg => {
-        messages.push({ role: msg.role, content: msg.content });
-      });
-    }
-
-    messages.push({ role: 'user', content: request.prompt });
-
-    return messages;
-  }
-
-  private calculateCost(tokens?: number, model?: string): number | undefined {
-    if (!tokens || !model) return undefined;
-    
-    // Simplified cost calculation - can be enhanced with actual pricing
-    const costPer1kTokens = model.includes('gpt-4') ? 0.03 : 0.002;
-    return (tokens / 1000) * costPer1kTokens;
   }
 }

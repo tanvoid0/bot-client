@@ -1,10 +1,13 @@
 {
   "name": "@tanvoid0/bot-client",
-  "version": "1.1.1",
-  "description": "A powerful, configurable npm package for easily switching between different AI models and providers. Fully tested with Ollama, LM Studio, and Google Gemini, with complete API integration for OpenAI and Anthropic.",
+  "version": "1.3.0",
+  "description": "A powerful, configurable npm package for easily switching between different AI models and providers. Zero-config setup for local providers (Ollama, LM Studio), with complete API integration for cloud providers (OpenAI, Anthropic, Gemini).",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "bot-client": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -14,17 +17,20 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "jest",
+    "test": "jest --forceExit",
     "test:integration": "node scripts/test-integration.js",
     "test:package": "node test-package.js",
     "lint": "eslint src/**/*.ts",
     "docs": "typedoc src/index.ts --out docs",
-    "clean": "if exist dist rmdir /s /q dist && if exist docs rmdir /s /q docs",
+    "clean": "node -e \"const fs=require('fs'); ['dist','docs'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true});}catch(e){}})\"",
     "prepublishOnly": "npm run clean && npm run build && npm test",
     "publish:patch": "node scripts/publish.js patch",
     "publish:minor": "node scripts/publish.js minor",
     "publish:major": "node scripts/publish.js major",
-    "publish:dry": "node scripts/publish.js dry"
+    "publish:dry": "node scripts/publish.js dry",
+    "demo:web": "npm run build && node examples/web-server-example.js",
+    "demo:html": "npm run build && echo 'Open examples/react-demo.html in your browser'",
+    "cli": "node dist/cli.js"
   },
   "keywords": [
     "ai",
@@ -39,10 +45,12 @@
     "machine-learning",
     "typescript"
   ],
-  "author": "Your Name",
+  "author": "tanvoid0",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "express": "^5.1.0",
+    "react": "^19.1.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

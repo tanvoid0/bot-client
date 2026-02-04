@@ -1,41 +1,33 @@
-import { AIFactory, aiFactory, AIRequest, AIResponse, AIProviderConfig } from '../dist/index.js';
+import { AIFactory, aiFactory, AIRequest, AIResponse, type AIProvider } from '../dist/index.js';
 
 /**
  * Advanced Usage Example
- * 
- * This example demonstrates advanced features:
- * - Custom provider implementation
- * - Error handling and retry logic
- * - Batch processing
- * - Provider selection strategies
- * - Custom configurations
+ *
+ * - Custom provider (implements AIProvider)
+ * - Error handling and batch processing
+ * - Provider selection and full metadata
  */
 
-// Custom provider example
-class CustomProvider {
-  providerId = 'custom';
-  providerName = 'Custom Provider';
-  private config: AIProviderConfig;
+class CustomProvider implements AIProvider {
+  readonly providerId = 'custom';
+  readonly providerName = 'Custom Provider';
+  readonly supportedModels: string[];
 
-  constructor(config: AIProviderConfig) {
-    this.config = config;
+  constructor(models: string[] = ['custom-model', 'demo-model']) {
+    this.supportedModels = models;
   }
 
-  get supportedModels(): string[] {
-    return this.config.supportedModels;
+  async discoverModels(): Promise<string[]> {
+    return this.supportedModels;
   }
 
   async process(request: AIRequest): Promise<AIResponse> {
-    // Simulate processing delay
     await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Simple echo response for demonstration
     const response = `[Custom Provider] Processed: ${request.prompt}`;
-    
     return {
       success: true,
       data: response,
-      modelUsed: request.modelId || 'custom-model',
+      modelUsed: request.modelId ?? 'custom-model',
       providerId: this.providerId,
       tokensUsed: request.prompt.length,
       processingTime: 100
@@ -43,44 +35,26 @@ class CustomProvider {
   }
 
   async testConnection(): Promise<boolean> {
-    return true; // Always available for demo
+    return true;
   }
 
   isModelSupported(modelId: string): boolean {
     return this.supportedModels.includes(modelId);
-  }
-
-  getDefaultConfig(): AIProviderConfig {
-    return this.config;
   }
 }
 
 async function advancedUsageExample() {
   console.log('🚀 AI Model Manager - Advanced Usage Example\n');
 
-  // Wait for AIFactory to initialize
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
   try {
-    // 1. Create custom AIFactory with custom provider
-    console.log('1️⃣ Custom AIFactory with Custom Provider:');
-    const customProvider = new CustomProvider({
-      defaultModel: 'custom-model',
-      defaultTemperature: 0.7,
-      defaultMaxTokens: 1000,
-      supportedModels: ['custom-model', 'demo-model']
-    });
-
+    const customProvider = new CustomProvider();
     const customFactory = new AIFactory({
       defaultProvider: 'custom',
-      providers: {
-        custom: customProvider
-      }
+      providers: [customProvider]
     });
+    await customFactory.ready();
 
-    // Wait for initialization
-    await new Promise(resolve => setTimeout(resolve, 500));
-
+    console.log('1️⃣ Custom AIFactory with Custom Provider:');
     const customResponse = await customFactory.generate('Hello from custom provider!');
     console.log('Custom Provider Response:', customResponse);
     console.log('---\n');
