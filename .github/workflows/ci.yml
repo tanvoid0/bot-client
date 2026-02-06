@@ -87,6 +87,12 @@ jobs:
         registry-url: 'https://registry.npmjs.org'
         cache: 'npm'
     
+    - name: Set package info
+      id: pkg
+      run: |
+        echo "name=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).name")" >> $GITHUB_OUTPUT
+        echo "version=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")" >> $GITHUB_OUTPUT
+    
     - name: Install dependencies
       run: npm ci
     
@@ -99,7 +105,7 @@ jobs:
     - name: Check if package exists
       id: check-package
       run: |
-        if npm view ${{ env.npm_package_name }} version >/dev/null 2>&1; then
+        if npm view ${{ steps.pkg.outputs.name }} version >/dev/null 2>&1; then
           echo "exists=true" >> $GITHUB_OUTPUT
         else
           echo "exists=false" >> $GITHUB_OUTPUT
@@ -117,24 +123,24 @@ jobs:
     
     - name: Create GitHub Release
       if: github.event_name == 'workflow_dispatch'
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: v${{ env.npm_package_version }}
-        release_name: Release v${{ env.npm_package_version }}
+        tag_name: v${{ steps.pkg.outputs.version }}
+        name: Release v${{ steps.pkg.outputs.version }}
         body: |
           ## What's Changed
           
-          This release includes the latest updates to the AI Factory package.
+          This release includes the latest updates to the package.
           
-          ### Version: ${{ env.npm_package_version }}
+          ### Version: ${{ steps.pkg.outputs.version }}
           
           ### Installation
           ```bash
-          npm install ${{ env.npm_package_name }}
+          npm install ${{ steps.pkg.outputs.name }}
           ```
         draft: false
         prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 
