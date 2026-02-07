@@ -73,6 +73,9 @@ jobs:
   publish:
     needs: [test, security]
     runs-on: ubuntu-latest
+    environment: CI/CD Environment
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     if: |
       (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'publish') ||
       (github.event_name == 'release' && github.event.action == 'published')
@@ -118,8 +121,6 @@ jobs:
           exit 1
         fi
         npm publish
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     
     - name: Create GitHub Release
       if: github.event_name == 'workflow_dispatch'
