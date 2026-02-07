@@ -1,0 +1,32 @@
+# Run locally with: act workflow_dispatch -s NPM_TOKEN="your-token"
+# Or: act workflow_dispatch --secret-file .secrets
+name: Verify NPM Token
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Get package name
+        id: pkg
+        run: echo "name=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).name")" >> $GITHUB_OUTPUT
+
+      - name: Verify NPM token (whoami)
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify package access
+        run: npm view ${{ steps.pkg.outputs.name }} version 2>/dev/null || echo "Package not published yet (ok for first publish)"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
