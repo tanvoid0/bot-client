@@ -1,5 +1,3 @@
-# Run locally with: act workflow_dispatch -s NPM_TOKEN="your-token"
-# Or: act workflow_dispatch --secret-file .secrets
 name: Verify NPM Token
 
 on:
@@ -8,6 +6,8 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,12 +21,16 @@ jobs:
         id: pkg
         run: echo "name=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).name")" >> $GITHUB_OUTPUT
 
+      - name: Check NPM_TOKEN secret
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "::error::NPM_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (name: NPM_TOKEN, value: your npm access token from https://www.npmjs.com/settings/~/tokens)."
+            exit 1
+          fi
+          echo "NPM_TOKEN is set."
+
       - name: Verify NPM token (whoami)
         run: npm whoami
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify package access
         run: npm view ${{ steps.pkg.outputs.name }} version 2>/dev/null || echo "Package not published yet (ok for first publish)"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
