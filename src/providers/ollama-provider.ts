@@ -1,5 +1,5 @@
-import { AIRequest, AIResponse } from '../types/index.js';
-import { BaseProvider, buildChatMessages } from './base-provider.js';
+import { AIRequest, AIResponse, AIStreamChunk } from '../types/index.js';
+import { BaseProvider, buildChatMessages, streamLines, readStreamToString } from './base-provider.js';
 import {
   runOllamaCLI,
   isOllamaCLIAvailable,
@@ -224,6 +224,75 @@ export class OllamaProvider extends BaseProvider {
     }
   }
 
+  /**
+   * Ollama's `/api/chat` with `stream: true`, which answers in NDJSON: one
+   * JSON object per line, the last carrying `done` and the token counts.
+   */
+  async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
+    const client = this.getApiClient();
+    const modelToUse = request.modelId ?? this.supportedModels[0];
+    const response = await client.post(
+      '/api/chat',
+      {
+        model: modelToUse,
+        messages: buildChatMessages(request),
+        stream: true,
+        ...(request.jsonMode && { format: 'json' }),
+        options: {
+          temperature: request.temperature ?? 0.7,
+          ...(request.maxTokens !== undefined && { num_predict: request.maxTokens })
+        }
+      },
+      {
+          responseType: 'stream',
+        // 30s client default is a socket idle timeout, which kills a cold model load or a stall mid-stream.
+        timeout: 0,
+        signal: request.signal,
+        validateStatus: () => true,
+      },
+    );
+
+    if (response.status >= 300) {
+      const text = await readStreamToString(response.data as AsyncIterable<Buffer>);
+      throw new Error(`Ollama stream HTTP ${response.status}: ${text.slice(0, 200)}`);
+    }
+
+    for await (const line of streamLines(response.data as AsyncIterable<Buffer>)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (typeof parsed?.error === 'string') {
+        throw new Error(parsed.error);
+      }
+      const content = parsed?.message?.content;
+      if (typeof content === 'string' && content.length > 0) {
+        yield { text: content, modelUsed: modelToUse };
+      }
+      if (parsed?.done) {
+        const promptTokens = parsed.prompt_eval_count;
+        const completionTokens = parsed.eval_count;
+        yield {
+          text: '',
+          done: true,
+          modelUsed: modelToUse,
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens:
+              promptTokens !== undefined && completionTokens !== undefined
+                ? promptTokens + completionTokens
+                : undefined,
+          },
+        };
+      }
+    }
+  }
+
   async process(request: AIRequest): Promise<AIResponse> {
     try {
       const client = this.getApiClient();
@@ -234,14 +303,30 @@ export class OllamaProvider extends BaseProvider {
         model: modelToUse,
         messages,
         stream: false,
+        ...(request.jsonMode && { format: 'json' }),
         options: {
           temperature: request.temperature ?? 0.7,
-          num_predict: request.maxTokens ?? 1000
+          ...(request.maxTokens !== undefined && { num_predict: request.maxTokens })
         }
       });
 
       const content = response.data.message?.content ?? '';
-      return this.createResponse(true, content, undefined, request.modelId ?? modelToUse);
+      const promptTokens = response.data.prompt_eval_count;
+      const completionTokens = response.data.eval_count;
+      return this.createResponse(
+        true,
+        content,
+        undefined,
+        request.modelId ?? modelToUse,
+        {
+          promptTokens,
+          completionTokens,
+          totalTokens:
+            promptTokens !== undefined && completionTokens !== undefined
+              ? promptTokens + completionTokens
+              : undefined
+        }
+      );
     } catch (error) {
       this.handleError(error, 'Ollama processing');
     }

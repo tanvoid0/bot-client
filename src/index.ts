@@ -23,6 +23,7 @@ export type {
   AIProvider,
   AIRequest,
   AIResponse,
+  AIStreamChunk,
   AIFactoryConfig,
   AIProviderConfig,
   Logger,

@@ -38,7 +38,12 @@ export class LMStudioProvider extends BaseProvider {
       const response = await client.get('/v1/models');
 
       const models = response.data.data || [];
-      this._supportedModels = models.map((m: { id: string }) => m.id);
+      // Only include chat/LLM models; exclude embedding models (e.g. "text-embedding-*") so
+      // default model for generate() is valid for /v1/chat/completions.
+      const chatModels = models.filter(
+        (m: { id: string; object?: string }) => !/embed/i.test(m.id ?? '')
+      );
+      this._supportedModels = chatModels.map((m: { id: string }) => m.id);
 
       return this._supportedModels;
     } catch {
@@ -56,10 +61,19 @@ export class LMStudioProvider extends BaseProvider {
 
   async process(request: AIRequest): Promise<AIResponse> {
     try {
+      const defaultModel = this.supportedModels[0];
+      if (!request.modelId && !defaultModel) {
+        return this.createResponse(
+          false,
+          undefined,
+          'No chat models available (only embedding models may be loaded)',
+          undefined
+        );
+      }
       const client = this.getClient();
       const messages = buildChatMessages(request);
       const response = await client.post('/v1/chat/completions', {
-        model: request.modelId ?? this.supportedModels[0],
+        model: request.modelId ?? defaultModel,
         messages,
         max_tokens: request.maxTokens ?? 1000,
         temperature: request.temperature ?? 0.7

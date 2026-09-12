@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [16.x, 18.x, 20.x]
+        node-version: [18.x, 20.x, 22.x]
 
     steps:
     - uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
       run: npm audit --audit-level=moderate --registry=https://registry.npmjs.org/
     
     - name: Check for secrets
-      uses: trufflesecurity/trufflehog@main
+      uses: trufflesecurity/trufflehog@v3
       with:
         path: ./
         base: HEAD~1

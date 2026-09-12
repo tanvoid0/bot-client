@@ -4,6 +4,10 @@ import { BaseProvider, buildChatMessages } from './base-provider.js';
 
 const ANTHROPIC_BASE = 'https://api.anthropic.com';
 
+/** Anthropic has no native JSON mode; ask for JSON in the system prompt. */
+const DEFAULT_MODEL = 'claude-3-5-sonnet-latest';
+const SYSTEM_JOINER = '\n\n';
+
 export interface AnthropicProviderConfig {
   apiKey?: string;
 }
@@ -51,17 +55,34 @@ export class AnthropicProvider extends BaseProvider {
 
     try {
       const client = this.getClient();
-      const messages = buildChatMessages(request);
+      // The Messages API takes the system prompt as a top-level field and
+      // rejects a system role inside `messages`.
+      const all = buildChatMessages(request);
+      const system = all
+        .filter((m) => m.role === 'system')
+        .map((m) => m.content)
+        .join(SYSTEM_JOINER);
+      const messages = all.filter((m) => m.role !== 'system');
+
       const response = await client.post('/v1/messages', {
-        model: request.modelId ?? 'claude-3-sonnet-20240229',
+        model: request.modelId ?? DEFAULT_MODEL,
         messages,
-        max_tokens: request.maxTokens ?? 1000,
+        ...(system && { system }),
+        max_tokens: request.maxTokens ?? 4096,
         temperature: request.temperature ?? 0.7
       });
 
       const content = response.data.content?.[0]?.text ?? '';
-      const modelUsed = request.modelId ?? 'claude-3-sonnet-20240229';
-      return this.createResponse(true, content, undefined, modelUsed);
+      const modelUsed = request.modelId ?? DEFAULT_MODEL;
+      const usage = response.data.usage;
+      return this.createResponse(true, content, undefined, modelUsed, {
+        promptTokens: usage?.input_tokens,
+        completionTokens: usage?.output_tokens,
+        totalTokens:
+          usage?.input_tokens !== undefined && usage?.output_tokens !== undefined
+            ? usage.input_tokens + usage.output_tokens
+            : undefined
+      });
     } catch (error) {
       this.handleError(error, 'Anthropic processing');
     }

@@ -1,6 +1,28 @@
 import { AIFactory, aiFactory, ensureFactoryReady, AIRequest, AIResponse, AIError, type AIProvider } from '../src/index.js';
 import { buildChatMessages } from '../src/providers/base-provider.js';
 
+// Mock the singleton so ensureFactoryReady test does not hit the network (avoids timeout and open handles).
+jest.mock('../src/ai-factory.js', () => {
+  const actual = jest.requireActual('../src/ai-factory.js');
+  const mockFactory = {
+    ready: () => Promise.resolve(),
+    getAvailableProviders: () => ['mock'],
+    getProvider: () => null,
+    getAllProviders: () => [],
+    getProviderForModel: () => null,
+    getAllSupportedModels: () => [],
+    testProviders: () => Promise.resolve({})
+  };
+  return {
+    ...actual,
+    aiFactory: mockFactory,
+    ensureFactoryReady: async () => {
+      await mockFactory.ready();
+      return mockFactory;
+    }
+  };
+});
+
 describe('Bot Client Unit Tests', () => {
   describe('AIRequest Interface', () => {
     test('should accept valid AIRequest object', () => {

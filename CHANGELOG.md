@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-07
+
+### Added
+
+- **Streaming**: `AIFactory.processStream(request)` and `AIProvider.processStream`, yielding `AIStreamChunk`s (`text` written since the last chunk, then a final chunk carrying `done` and the token usage).
+  - `GeminiProvider` reads `streamGenerateContent` as SSE; `OllamaProvider` reads `/api/chat` NDJSON. Same request body as `process`, so a streamed answer is the same answer in pieces.
+  - `BaseProvider.processStream` falls back to one chunk from `process()`, so every provider — OpenAI, Anthropic, LM Studio — can be consumed as a stream today and gain real streaming later without callers changing.
+  - No retry and no fallback provider on the streaming path: half an answer is usually already on screen when a stream fails, and restarting elsewhere would splice two answers together.
+- `streamLines` helper, exported from `base-provider`, which reassembles lines split across network reads.
+- `AIRequest.signal` (`AbortSignal`) to abort an in-flight request/stream; wired through `GeminiProvider` and `OllamaProvider`'s `processStream`, which also drop the client's 30s socket-idle timeout on the streaming call so a cold model load or a mid-stream stall isn't cut off.
+
+---
+
 ## [1.3.1] - 2026-02-04
 
 ### Fixed

@@ -1,36 +1,41 @@
 {
   "name": "@tanvoid0/bot-client",
-  "version": "1.3.2",
+  "version": "1.5.0",
   "description": "A powerful, configurable npm package for easily switching between different AI models and providers. Zero-config setup for local providers (Ollama, LM Studio), with complete API integration for cloud providers (OpenAI, Anthropic, Gemini).",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cjs/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "bot-client": "./dist/cli.js"
+    "bot-client": "dist/cli.js"
   },
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:esm && npm run build:cjs",
     "test": "jest --forceExit",
+    "test:unit": "jest tests/unit-tests.ts --forceExit",
     "test:integration": "node scripts/test-integration.js",
     "test:package": "node test-package.js",
     "lint": "eslint src/**/*.ts",
     "docs": "typedoc src/index.ts --out docs",
     "clean": "node -e \"const fs=require('fs'); ['dist','docs'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true});}catch(e){}})\"",
-    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "prepublishOnly": "npm run clean && npm run build && npm run test:unit",
     "publish:patch": "node scripts/publish.js patch",
     "publish:minor": "node scripts/publish.js minor",
     "publish:major": "node scripts/publish.js major",
     "publish:dry": "node scripts/publish.js dry",
     "demo:web": "npm run build && node examples/web-server-example.js",
     "demo:html": "npm run build && echo 'Open examples/react-demo.html in your browser'",
-    "cli": "node dist/cli.js"
+    "cli": "node dist/cli.js",
+    "build:esm": "tsc",
+    "build:cjs": "tsc -p tsconfig.cjs.json && node scripts/finalize-cjs.cjs"
   },
   "keywords": [
     "ai",
@@ -48,9 +53,7 @@
   "author": "tanvoid0",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.0",
-    "express": "^5.1.0",
-    "react": "^19.1.1"
+    "axios": "^1.6.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
@@ -61,7 +64,9 @@
     "jest": "^29.5.0",
     "ts-jest": "^29.1.0",
     "typedoc": "^0.25.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "express": "^5.1.0",
+    "react": "^19.1.1"
   },
   "engines": {
     "node": ">=16.0.0"
@@ -81,5 +86,6 @@
   ],
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "module": "dist/index.js"
 }

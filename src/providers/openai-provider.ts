@@ -80,12 +80,18 @@ export class OpenAIProvider extends BaseProvider {
       const response = await client.post('/v1/chat/completions', {
         model: request.modelId ?? this.supportedModels[0],
         messages,
-        max_tokens: request.maxTokens ?? 1000,
-        temperature: request.temperature ?? 0.7
+        ...(request.maxTokens !== undefined && { max_tokens: request.maxTokens }),
+        temperature: request.temperature ?? 0.7,
+        ...(request.jsonMode && { response_format: { type: 'json_object' } })
       });
 
       const content = response.data.choices?.[0]?.message?.content ?? '';
-      return this.createResponse(true, content, undefined, request.modelId);
+      const usage = response.data.usage;
+      return this.createResponse(true, content, undefined, request.modelId, {
+        promptTokens: usage?.prompt_tokens,
+        completionTokens: usage?.completion_tokens,
+        totalTokens: usage?.total_tokens
+      });
     } catch (error) {
       this.handleError(error, 'OpenAI processing');
     }

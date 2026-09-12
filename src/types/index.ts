@@ -5,9 +5,31 @@ export interface AIProvider {
   readonly supportedModels: string[];
   
   process(request: AIRequest): Promise<AIResponse>;
+  /**
+   * The same completion, delivered as it is written.
+   *
+   * Optional on the interface so a provider written before streaming existed
+   * still satisfies it; `BaseProvider` supplies a one-chunk implementation, so
+   * every provider that extends it can be consumed as a stream regardless.
+   */
+  processStream?(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void>;
   isModelSupported(modelId: string): boolean;
   testConnection(): Promise<boolean>;
   discoverModels(): Promise<string[]>;
+}
+
+/**
+ * One piece of a streamed answer.
+ *
+ * [text] is what was written since the previous chunk, never the whole answer
+ * so far -- a consumer appends. The final chunk carries `done` and, where the
+ * provider reports it, the token usage for the whole call.
+ */
+export interface AIStreamChunk {
+  text: string;
+  done?: boolean;
+  usage?: TokenUsage;
+  modelUsed?: string;
 }
 
 // Base AI Request Interface
@@ -17,8 +39,14 @@ export interface AIRequest {
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  /** Ask the provider for JSON. Providers that support a native JSON mode use it. */
+  jsonMode?: boolean;
+  /** Optional response schema, passed through when the provider supports one. */
+  responseSchema?: unknown;
   history?: ConversationHistory[];
   metadata?: Record<string, any>;
+  /** Aborts an in-flight request/stream. */
+  signal?: AbortSignal;
   usageContext?: {
     taskType: 'content-generation' | 'analysis' | 'conversation' | 'code-generation' | 'custom';
     priority: 'low' | 'medium' | 'high';
@@ -34,7 +62,12 @@ export interface AIResponse {
   error?: string;
   modelUsed?: string;
   providerId?: string;
+  /** Total tokens billed, when the provider reports them. */
   tokensUsed?: number;
+  /** Input tokens, when the provider reports them separately. */
+  promptTokens?: number;
+  /** Output tokens, when the provider reports them separately. */
+  completionTokens?: number;
   cost?: number;
   processingTime?: number;
   modelCapabilities?: string[];
@@ -45,6 +78,13 @@ export interface AIResponse {
   timestamp?: Date;
   retryCount?: number;
   fallbackUsed?: boolean;
+}
+
+/** Token counts as reported by a provider. Fields are absent when unreported. */
+export interface TokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
 }
 
 // Conversation History

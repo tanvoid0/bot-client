@@ -18,6 +18,7 @@ console.log('  npm run publish:patch  - Bump patch version and publish');
 console.log('  npm run publish:minor  - Bump minor version and publish');
 console.log('  npm run publish:major  - Bump major version and publish');
 console.log('  npm run publish:dry    - Dry run (build and test only)');
+console.log('  Add --no-git or set NO_GIT_PUSH=1 to skip git tag/push (publish to npm only).');
 
 const command = process.argv[2];
 
@@ -62,9 +63,16 @@ async function publish(versionType) {
     // Publish to npm
     await runCommand('npm publish', 'Publishing to npm');
     
-    // Create git tag
-    await runCommand(`git tag v${newPackageJson.version}`, 'Creating git tag');
-    await runCommand('git push --tags', 'Pushing tags to remote');
+    // Optional: create git tag and push (skip if NO_GIT_PUSH=1 or --no-git)
+    const noGitPush = process.env.NO_GIT_PUSH === '1' || process.argv.includes('--no-git');
+    if (!noGitPush) {
+      try {
+        await runCommand(`git tag v${newPackageJson.version}`, 'Creating git tag');
+        await runCommand('git push --tags', 'Pushing tags to remote');
+      } catch (e) {
+        console.warn('\n⚠️  Publish to npm succeeded; git tag/push skipped (use NO_GIT_PUSH=1 or --no-git to suppress).');
+      }
+    }
     
     console.log(`\n🎉 Successfully published ${newPackageJson.name}@${newPackageJson.version} to npm!`);
     console.log(`📦 Package: https://www.npmjs.com/package/${newPackageJson.name}`);

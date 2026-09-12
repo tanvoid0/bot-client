@@ -1,4 +1,4 @@
-import { AIProvider, AIRequest, AIResponse, AIError, AIFactoryConfig } from './types/index.js';
+import { AIProvider, AIRequest, AIResponse, AIError, AIFactoryConfig, AIStreamChunk } from './types/index.js';
 import { OpenAIProvider } from './providers/openai-provider.js';
 import { OllamaProvider } from './providers/ollama-provider.js';
 import { LMStudioProvider } from './providers/lmstudio-provider.js';
@@ -7,12 +7,28 @@ import { GeminiProvider } from './providers/gemini-provider.js';
 
 export class AIFactory {
   private providers: Map<string, AIProvider> = new Map();
-  private initializationPromise: Promise<void>;
+  private initializationPromise: Promise<void> | null = null;
   private readonly config: AIFactoryConfig;
 
   constructor(config?: AIFactoryConfig) {
     this.config = config ?? {};
-    this.initializationPromise = this.initializeProviders();
+  }
+
+  /**
+   * Provider discovery probes every provider over the network, and for cloud
+   * providers `testConnection` costs a real request. It runs on first use, not
+   * on construction, so importing or wiring this into a DI container is free.
+   */
+  private ensureInitialized(): Promise<void> {
+    if (this.initializationPromise) return this.initializationPromise;
+
+    // A discovery run that registered nothing is usually a transient outage.
+    // Forgetting it lets the next request retry instead of leaving the factory
+    // permanently empty until the process restarts.
+    this.initializationPromise = this.initializeProviders().then(() => {
+      if (this.providers.size === 0) this.initializationPromise = null;
+    });
+    return this.initializationPromise;
   }
 
   private log(level: keyof NonNullable<AIFactoryConfig['logger']>, message: string, ...args: unknown[]): void {
@@ -70,7 +86,7 @@ export class AIFactory {
   }
 
   async generate(prompt: string, options?: Partial<AIRequest>): Promise<string> {
-    await this.initializationPromise;
+    await this.ensureInitialized();
 
     const response = await this.process({ prompt, ...options });
 
@@ -82,7 +98,7 @@ export class AIFactory {
   }
 
   async process(request: AIRequest): Promise<AIResponse> {
-    await this.initializationPromise;
+    await this.ensureInitialized();
 
     let provider = this.resolveProvider(request);
     if (!provider) {
@@ -107,6 +123,41 @@ export class AIFactory {
       }
     }
     return result;
+  }
+
+  /**
+   * The same call as [process], streamed.
+   *
+   * No retry and no fallback provider here, on purpose: by the time a stream
+   * fails the caller has usually shown half an answer already, and silently
+   * restarting on another provider would splice two different answers
+   * together. A failure is thrown for the caller to handle.
+   */
+  async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
+    await this.ensureInitialized();
+
+    const provider = this.resolveProvider(request);
+    if (!provider) {
+      throw new Error('No AI providers available');
+    }
+    if (!provider.processStream) {
+      const result = await provider.process(request);
+      if (!result.success) {
+        throw new Error(result.error ?? 'AI request failed');
+      }
+      yield {
+        text: result.data ?? '',
+        done: true,
+        modelUsed: result.modelUsed,
+        usage: {
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          totalTokens: result.tokensUsed,
+        },
+      };
+      return;
+    }
+    yield* provider.processStream(request);
   }
 
   getAvailableProviders(): string[] {
@@ -140,7 +191,7 @@ export class AIFactory {
 
   /** Test each registered provider; returns map of providerId -> ok. */
   async testProviders(): Promise<Record<string, boolean>> {
-    await this.initializationPromise;
+    await this.ensureInitialized();
     const out: Record<string, boolean> = {};
     for (const [id, p] of this.providers) {
       out[id] = await p.testConnection();
@@ -148,16 +199,19 @@ export class AIFactory {
     return out;
   }
 
-  /** Promise that resolves when initialization is complete. */
+  /** Runs provider discovery if it has not run yet. */
   ready(): Promise<void> {
-    return this.initializationPromise;
+    return this.ensureInitialized();
   }
 }
 
-// Export singleton instance with proper initialization
+/**
+ * Shared factory. Constructing it is free — provider discovery is deferred to
+ * the first request — so importing this module touches no network.
+ */
 export const aiFactory = new AIFactory();
 
-// Helper function to ensure factory is ready
+/** Shared factory, with provider discovery already run. */
 export async function ensureFactoryReady(): Promise<AIFactory> {
   await aiFactory.ready();
   return aiFactory;
