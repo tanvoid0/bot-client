@@ -37,8 +37,7 @@ import { aiFactory } from '@tanvoid0/bot-client';
 
 for await (const chunk of aiFactory.processStream({ prompt: 'Count to twenty.' })) {
   process.stdout.write(chunk.text);
-  if (chunk.done) console.log('
-', chunk.usage); // { promptTokens, completionTokens, totalTokens }
+  if (chunk.done) console.log('\n', chunk.usage); // { promptTokens, completionTokens, totalTokens }
 }
 ```
 
