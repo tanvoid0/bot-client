@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio. Zero-config for local; API keys for cloud. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
+Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio. Zero-config for local; API keys for cloud. One request shape for every provider, with **streaming**, **JSON mode** and **abort** where the provider supports them. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
 
 ---
 
@@ -25,6 +25,58 @@ console.log(text);
 ```
 
 With **Ollama** running locally, this works without API keys. For cloud providers, set env vars (see [Environment](#environment)).
+
+---
+
+## Streaming
+
+`processStream` yields the answer as it is written. Each chunk's `text` is the delta since the previous chunk — append, don't replace. The last chunk has `done: true` and, when the provider reports it, token `usage` for the whole call.
+
+```typescript
+import { aiFactory } from '@tanvoid0/bot-client';
+
+for await (const chunk of aiFactory.processStream({ prompt: 'Count to twenty.' })) {
+  process.stdout.write(chunk.text);
+  if (chunk.done) console.log('
+', chunk.usage); // { promptTokens, completionTokens, totalTokens }
+}
+```
+
+Gemini (SSE) and Ollama (NDJSON) stream for real. The other providers fall back to one chunk holding the full answer, so the loop above works everywhere — it just arrives all at once.
+
+Streaming calls have **no socket timeout** (a cold model load can take longer than 30 s to first token). Cancel with an `AbortSignal` instead:
+
+```typescript
+const abort = new AbortController();
+setTimeout(() => abort.abort(), 10_000);
+
+try {
+  for await (const chunk of aiFactory.processStream({ prompt, signal: abort.signal })) {
+    process.stdout.write(chunk.text);
+  }
+} catch (err) {
+  if (abort.signal.aborted) console.log('cancelled');
+  else throw err;
+}
+```
+
+Breaking out of the `for await` also closes the upstream connection. A provider error mid-stream (non-2xx, or an Ollama `{"error"}` line) throws from the loop rather than ending it as success.
+
+---
+
+## JSON mode
+
+`jsonMode: true` asks the provider for JSON output using its native mechanism (Gemini `responseMimeType`, Ollama `format: 'json'`, OpenAI `response_format`). Parse the result yourself; the client returns the raw string.
+
+```typescript
+const res = await aiFactory.process({
+  prompt: 'List three fruits as {"fruits": string[]}.',
+  jsonMode: true,
+});
+const { fruits } = JSON.parse(res.data!);
+```
+
+`responseSchema` is passed through only where the provider accepts one (Gemini today) and in that provider's own dialect — it is not translated between providers.
 
 ---
 
@@ -103,6 +155,7 @@ Local providers (Ollama, LM Studio) need no keys; ensure the app is running on i
 
 - `generate(prompt, options?)` → `Promise<string>`
 - `process(request)` → `Promise<AIResponse>`
+- `processStream(request)` → `AsyncGenerator<AIStreamChunk>` (see [Streaming](#streaming))
 - `getAvailableProviders()` → `string[]`
 - `getProvider(id)` → `AIProvider | null`
 - `getAllProviders()` → `AIProvider[]`
@@ -190,25 +243,29 @@ const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => pr
 <details>
 <summary><strong>Types</strong></summary>
 
-- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `metadata?`, `usageContext?`
-- **AIResponse**: `success`, `data?`, `error?`, `modelUsed?`, `providerId?`, `processingTime?`, `confidence?`, `tokensUsed?`, `cost?`
+- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `jsonMode?`, `responseSchema?`, `signal?` (`AbortSignal`), `metadata?`, `usageContext?`
+- **AIResponse**: `success`, `data?`, `error?`, `modelUsed?`, `providerId?`, `processingTime?`, `tokensUsed?`, `promptTokens?`, `completionTokens?`, `cost?`
+- **AIStreamChunk**: `text` (delta), `done?`, `usage?` (`TokenUsage`), `modelUsed?`
+- **TokenUsage**: `promptTokens?`, `completionTokens?`, `totalTokens?`
 - **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `providerOrder?`, `logger?`, `providers?`, `retries?`
 - **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
 - **AIError**: `message`, `provider`, `statusCode?`, `details?`, `code?` (e.g. `NO_API_KEY`, `RATE_LIMIT`)
-- **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`
+- **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`; `processStream` is optional (the factory falls back to one chunk from `process`)
 </details>
 
 ---
 
 ## Providers
 
-| Provider | Type | Notes |
-|---------|------|--------|
-| **Ollama** | Local | API + CLI; list/pull/rm/show/ps/run; tested |
-| **LM Studio** | Local | localhost:1234; tested |
-| **OpenAI** | Cloud | API key required |
-| **Anthropic** | Cloud | API key required |
-| **Gemini** | Cloud | API key required; tested |
+| Provider | Type | Streams | JSON mode | Notes |
+|---------|------|:-:|:-:|--------|
+| **Ollama** | Local | ✅ | ✅ | API + CLI; list/pull/rm/show/ps/run; tested |
+| **LM Studio** | Local | one chunk | — | localhost:1234; tested |
+| **OpenAI** | Cloud | one chunk | ✅ | API key required |
+| **Anthropic** | Cloud | one chunk | — | API key required |
+| **Gemini** | Cloud | ✅ | ✅ + `responseSchema` | API key required; tested |
+
+"One chunk" means `processStream` works but delivers the whole answer at once.
 
 The factory initializes all providers and keeps those that pass the connection test. Use `getProvider('ollama')` (etc.) to use a specific one.
 
