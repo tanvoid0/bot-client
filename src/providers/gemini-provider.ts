@@ -196,9 +196,7 @@ export class GeminiProvider extends BaseProvider {
         maxOutputTokens: request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: request.temperature ?? 0.7,
         ...(wantsJson(request) && { responseMimeType: 'application/json' }),
-        ...((jsonSchemaOf(request.schema) ?? request.responseSchema) !== undefined && {
-          responseSchema: jsonSchemaOf(request.schema) ?? request.responseSchema,
-        }),
+        ...(jsonSchemaOf(request.schema) !== undefined && { responseSchema: jsonSchemaOf(request.schema) }),
         ...(request.reasoning && { thinkingConfig: { includeThoughts: true } }),
       },
     };
@@ -299,7 +297,7 @@ export class GeminiProvider extends BaseProvider {
         if (typeof parsed?.modelVersion === 'string') modelUsed = parsed.modelVersion;
         const candidate = parsed?.candidates?.[0];
         const { text, reasoning } = textOf(candidate);
-        if (reasoning) yield { type: 'reasoning', text: '', reasoning, modelUsed };
+        if (reasoning) yield { type: 'reasoning', text: reasoning, modelUsed };
         if (text) {
           wrote = true;
           yield { type: 'text', text, modelUsed };
@@ -314,11 +312,9 @@ export class GeminiProvider extends BaseProvider {
     if (finish === 'content_filter' && !wrote) {
       throw this.error('CONTENT_FILTER', 'Answer blocked by Gemini', { model });
     }
-    for (const toolCall of toolCalls) yield { type: 'tool-call', text: '', toolCall, modelUsed };
+    for (const toolCall of toolCalls) yield { type: 'tool-call', toolCall, modelUsed };
     yield {
       type: 'done',
-      done: true,
-      text: '',
       modelUsed,
       usage,
       finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),

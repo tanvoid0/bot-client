@@ -26,17 +26,13 @@ import {
 export { HttpError, streamLines, parseSSE, parseNDJSON };
 export type { HttpOptions, HttpResult };
 
-export type ChatMessage = Message;
-
-/** The conversation as one list: systemPrompt, then `messages` (or the deprecated `history`), then `prompt` as a user turn. */
+/** The conversation as one list: systemPrompt, then `messages`, then `prompt` as a user turn. */
 export function buildChatMessages(request: AIRequest): Message[] {
   const messages: Message[] = [];
   if (request.systemPrompt) {
     messages.push({ role: 'system', content: request.systemPrompt });
   }
-  for (const m of request.messages ?? request.history ?? []) {
-    if (m.role === 'system' || m.role === 'user' || m.role === 'assistant' || m.role === 'tool') messages.push(m as Message);
-  }
+  for (const m of request.messages ?? []) messages.push(m);
   if (request.prompt !== undefined) messages.push({ role: 'user', content: request.prompt });
   return messages;
 }
@@ -44,13 +40,11 @@ export function buildChatMessages(request: AIRequest): Message[] {
 /** A one-shot answer as the chunks a stream would have produced. */
 export function* chunksOf(response: AIResponse): Generator<AIStreamChunk, void, void> {
   const modelUsed = response.modelUsed;
-  if (response.reasoning) yield { type: 'reasoning', text: '', reasoning: response.reasoning, modelUsed };
+  if (response.reasoning) yield { type: 'reasoning', text: response.reasoning, modelUsed };
   if (response.data) yield { type: 'text', text: response.data, modelUsed };
-  for (const toolCall of response.toolCalls ?? []) yield { type: 'tool-call', text: '', toolCall, modelUsed };
+  for (const toolCall of response.toolCalls ?? []) yield { type: 'tool-call', toolCall, modelUsed };
   yield {
     type: 'done',
-    done: true,
-    text: '',
     modelUsed,
     usage: response.usage,
     finishReason: response.finishReason ?? 'unknown',
@@ -238,11 +232,6 @@ export abstract class BaseProvider implements AIProvider {
     );
   }
 
-  /** Throws the classified `AIError`. Kept for subclasses written against 1.x. */
-  protected handleError(error: unknown, _operation?: string): never {
-    throw this.toError(error);
-  }
-
   // ---- http ---------------------------------------------------------------
 
   /** JSON request. Non-2xx throws [HttpError]; the JSON body (if any) is on `.json`. */
@@ -298,9 +287,6 @@ export abstract class BaseProvider implements AIProvider {
       ...(toolCalls && { toolCalls }),
       ...(extra.requestId && { requestId: extra.requestId }),
       ...(usage && { usage }),
-      ...(usage?.promptTokens !== undefined && { promptTokens: usage.promptTokens }),
-      ...(usage?.completionTokens !== undefined && { completionTokens: usage.completionTokens }),
-      ...(usage?.totalTokens !== undefined && { tokensUsed: usage.totalTokens }),
     };
   }
 
@@ -316,16 +302,4 @@ export abstract class BaseProvider implements AIProvider {
     };
   }
 
-  /** @deprecated Use `ok()` / `fail()`. Kept for subclasses written against 1.x. */
-  protected createResponse(
-    success: boolean,
-    data?: string,
-    error?: string,
-    modelUsed?: string,
-    usage?: TokenUsage
-  ): AIResponse {
-    return success
-      ? this.ok(data ?? '', { modelUsed, usage })
-      : this.fail(this.error('UNKNOWN', error ?? 'Request failed', { model: modelUsed }), modelUsed);
-  }
 }

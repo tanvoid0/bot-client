@@ -46,7 +46,7 @@ describe('Gemini provider', () => {
     await new GeminiProvider({ apiKey: 'k' }).process({
       prompt: 'hi',
       jsonMode: true,
-      responseSchema: schema,
+      schema,
     });
 
     expect(body().generationConfig.responseSchema).toEqual(schema);
@@ -58,9 +58,9 @@ describe('Gemini provider', () => {
       prompt: 'hi',
     });
 
-    expect(response.promptTokens).toBe(11);
-    expect(response.completionTokens).toBe(7);
-    expect(response.tokensUsed).toBe(18);
+    expect(response.usage?.promptTokens).toBe(11);
+    expect(response.usage?.completionTokens).toBe(7);
+    expect(response.usage?.totalTokens).toBe(18);
   });
 
   test('the output cap leaves room for structured replies', async () => {
@@ -77,8 +77,8 @@ describe('Gemini provider', () => {
     });
 
     expect(response.success).toBe(true);
-    expect(response.promptTokens).toBeUndefined();
-    expect(response.tokensUsed).toBeUndefined();
+    expect(response.usage?.promptTokens).toBeUndefined();
+    expect(response.usage?.totalTokens).toBeUndefined();
   });
 });
 
@@ -104,9 +104,9 @@ describe('Ollama provider', () => {
       modelId: 'gemma4',
     });
 
-    expect(response.promptTokens).toBe(5);
-    expect(response.completionTokens).toBe(9);
-    expect(response.tokensUsed).toBe(14);
+    expect(response.usage?.promptTokens).toBe(5);
+    expect(response.usage?.completionTokens).toBe(9);
+    expect(response.usage?.totalTokens).toBe(14);
   });
 });
 

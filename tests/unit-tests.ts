@@ -52,12 +52,12 @@ describe('Bot Client Unit Tests', () => {
       const request: AIRequest = {
         prompt: 'Follow-up',
         systemPrompt: 'You are helpful.',
-        history: [
+        messages: [
           { role: 'user', content: 'Hi' },
           { role: 'assistant', content: 'Hello!' }
         ]
       };
-      expect(request.history).toHaveLength(2);
+      expect(request.messages).toHaveLength(2);
       expect(request.systemPrompt).toBe('You are helpful.');
     });
   });
@@ -69,12 +69,7 @@ describe('Bot Client Unit Tests', () => {
         data: 'Test response',
         modelUsed: 'test-model',
         providerId: 'test-provider',
-        tokensUsed: 50,
-        cost: 0.001,
-        processingTime: 100,
-        modelCapabilities: ['text-generation'],
-        suggestedImprovements: ['Use more specific prompt'],
-        confidence: 0.9
+        usage: { totalTokens: 50 },
       };
 
       expect(response.success).toBe(true);
@@ -137,7 +132,7 @@ describe('Bot Client Unit Tests', () => {
     test('builds messages with history then prompt', () => {
       const messages = buildChatMessages({
         prompt: 'Again?',
-        history: [
+        messages: [
           { role: 'user', content: 'One' },
           { role: 'assistant', content: 'Two' }
         ]
@@ -152,7 +147,7 @@ describe('Bot Client Unit Tests', () => {
       const messages = buildChatMessages({
         prompt: 'Reply',
         systemPrompt: 'System',
-        history: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }]
+        messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }]
       });
       expect(messages).toHaveLength(4);
       expect(messages[0].role).toBe('system');

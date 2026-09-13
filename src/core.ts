@@ -31,24 +31,17 @@ export type {
   StandardSchemaV1,
   AIResponse,
   AIStreamChunk,
+  TextChunk,
+  ReasoningChunk,
+  ToolCallChunk,
+  DoneChunk,
   AIFactoryConfig,
-  AIProviderConfig,
   BaseProviderConfig,
   DiscoveryMode,
   FinishReason,
   Hooks,
   TokenUsage,
-  Logger,
-  ConversationHistory,
-  ContentGenerationRequest,
-  AnalysisRequest,
-  CodeGenerationRequest,
-  ConversationRequest,
-  PostProcessingOptions,
-  ModelCapabilities,
-  ProcessingMetrics,
-  ProviderType,
-  ProviderConfig
+  Logger
 } from './types/index.js';
 
 // Error handling

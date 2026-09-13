@@ -40,11 +40,12 @@ describe('buildChatMessages', () => {
     expect(buildChatMessages({ messages: [{ role: 'user', content: 'hi' }] })).toEqual([{ role: 'user', content: 'hi' }]);
   });
 
-  test('deprecated history still works, and messages wins over it', () => {
-    expect(buildChatMessages({ history: [{ role: 'user', content: 'old' }], prompt: 'p' })).toHaveLength(2);
-    expect(buildChatMessages({ history: [{ role: 'user', content: 'old' }], messages: [{ role: 'user', content: 'new' }] })).toEqual([
-      { role: 'user', content: 'new' },
-    ]);
+  test('a removed 1.x field fails loudly at the factory', async () => {
+    const factory = new AIFactory({ providers: [new OpenAIProvider({ apiKey: 'k', models: ['gpt-4o'] })], discover: 'none' });
+    const res = await factory.process({ prompt: 'p', history: [{ role: 'user', content: 'old' }] } as AIRequest);
+    expect(res.errorInfo?.code).toBe('INVALID_REQUEST');
+    expect(res.errorInfo?.message).toContain('history was removed in 2.0');
+    expect(res.errorInfo?.hint).toContain('messages');
   });
 });
 

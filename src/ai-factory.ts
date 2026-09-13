@@ -1,4 +1,4 @@
-import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, DoneChunk, Hooks, LegacyStreamChunk, Step, ToolCall } from './types/index.js';
+import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, DoneChunk, Hooks, Step, ToolCall } from './types/index.js';
 import { chunksOf } from './providers/base-provider.js';
 import { canRun, nextStepRequest, runTools } from './core/tools.js';
 import { parseJson, validate, wantsJson } from './core/schema.js';
@@ -6,14 +6,11 @@ import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
 import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
 import { guessProvider, splitExplicit } from './core/catalog.js';
 
-/** A chunk from a 1.x-shaped custom provider, given its `type`; typed chunks pass through. */
-function typed(chunk: AIStreamChunk | LegacyStreamChunk): AIStreamChunk {
-  if ('type' in chunk && chunk.type) return chunk;
-  const { done, reasoning, text, modelUsed, usage, finishReason, toolCalls, requestId } = chunk as LegacyStreamChunk;
-  if (done) return { type: 'done', done: true, text: '', modelUsed, usage, finishReason: finishReason ?? 'unknown', toolCalls, requestId };
-  if (reasoning) return { type: 'reasoning', text: '', reasoning, modelUsed };
-  return { type: 'text', text, modelUsed };
-}
+const REMOVED_REQUEST_FIELDS: Record<string, string> = {
+  history: 'Pass the same array as `messages`.',
+  responseSchema: 'Pass it as `schema` (a JSON Schema object or a Standard Schema).',
+  usageContext: 'It was never read; delete it.',
+};
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -132,6 +129,12 @@ export class AIFactory {
    * catalog, `defaultProvider`, `providerOrder`, first registered.
    */
   private resolve(request: AIRequest): { provider: AIProvider; request: AIRequest } | AIError {
+    // 1.x fields fail loudly rather than being silently ignored, so an upgrade cannot pass unnoticed.
+    for (const [field, hint] of Object.entries(REMOVED_REQUEST_FIELDS)) {
+      if (field in request) {
+        return AIError.from({ message: `AIRequest.${field} was removed in 2.0`, provider: 'AIFactory', code: 'INVALID_REQUEST', hint: `${hint} See MIGRATION.md.` });
+      }
+    }
     if (request.prompt === undefined && !request.messages?.length) {
       return AIError.from({ message: 'Pass prompt or messages', provider: 'AIFactory', code: 'INVALID_REQUEST', hint: 'A request needs a prompt string or a non-empty messages array.' });
     }
@@ -339,7 +342,7 @@ export class AIFactory {
 
   private finish(result: AIResponse, started: number, retryCount: number, fallbackUsed: boolean): AIResponse {
     const durationMs = Math.round(now() - started);
-    return { ...result, durationMs, processingTime: durationMs, retryCount, fallbackUsed };
+    return { ...result, durationMs, retryCount, fallbackUsed };
   }
 
   /**
@@ -360,7 +363,7 @@ export class AIFactory {
       let done: DoneChunk | undefined;
       // Tool-call chunks pass straight through; only the done chunk is held back while the loop continues.
       for await (const chunk of this.streamOnce(req)) {
-        text += chunk.text;
+        if (chunk.type === 'text') text += chunk.text;
         if (chunk.type !== 'done') {
           yield chunk;
           continue;
@@ -392,7 +395,7 @@ export class AIFactory {
         const gen = provider.processStream
           ? provider.processStream(request)
           : this.oneChunk(provider, request);
-        let first: IteratorResult<AIStreamChunk | LegacyStreamChunk, void>;
+        let first: IteratorResult<AIStreamChunk, void>;
         await this.hook('onRequest', { provider: provider.providerId, model: request.modelId, request });
         try {
           first = await gen.next();
@@ -423,8 +426,8 @@ export class AIFactory {
 
   /** Relays chunks, stamping timings on the `done` chunk and classifying anything thrown. */
   private async *drain(
-    first: IteratorResult<AIStreamChunk | LegacyStreamChunk, void>,
-    gen: AsyncGenerator<AIStreamChunk | LegacyStreamChunk, void, void>,
+    first: IteratorResult<AIStreamChunk, void>,
+    gen: AsyncGenerator<AIStreamChunk, void, void>,
     provider: AIProvider,
     model: string | undefined,
     started: number
@@ -433,11 +436,17 @@ export class AIFactory {
     let r = first;
     try {
       while (!r.done) {
-        const chunk = typed(r.value);
-        if (ttft === undefined && chunk.text) ttft = Math.round(now() - started);
+        const chunk = r.value;
+        if (!('type' in chunk)) {
+          throw AIError.from({
+            message: `${provider.providerId} yielded a 1.x stream chunk ({ text, done }); 2.0 chunks carry a type`,
+            provider: provider.providerId,
+            code: 'INVALID_RESPONSE',
+            hint: "Yield { type: 'text', text }, { type: 'reasoning', text }, { type: 'tool-call', toolCall } and a final { type: 'done', finishReason }. See MIGRATION.md.",
+          });
+        }
+        if (ttft === undefined && chunk.type === 'text' && chunk.text) ttft = Math.round(now() - started);
         if (chunk.type === 'done') {
-          // A 1.x provider lists its calls only on the done chunk; surface them as tool-call chunks first.
-          if (!('type' in r.value)) for (const toolCall of chunk.toolCalls ?? []) yield { type: 'tool-call', text: '', toolCall, modelUsed: chunk.modelUsed };
           const durationMs = Math.round(now() - started);
           const done: DoneChunk = { ...chunk, durationMs, timeToFirstTokenMs: ttft };
           await this.hook('onResponse', { provider: provider.providerId, model, response: done, durationMs });

@@ -9,7 +9,7 @@ import { GeminiProvider } from '../src/providers/gemini-provider.js';
 import { OllamaProvider } from '../src/providers/ollama-provider.js';
 import { AIFactory } from '../src/ai-factory.js';
 import { recoverLeakedToolCalls, nextStepRequest } from '../src/core/tools.js';
-import type { AIProvider, AIRequest, AIStreamChunk, Message, Tool } from '../src/types/index.js';
+import type { AIProvider, AIRequest, AIStreamChunk, Message, Tool, DoneChunk } from '../src/types/index.js';
 
 const weather: Tool = {
   name: 'get_weather',
@@ -79,8 +79,8 @@ describe('OpenAI-format', () => {
       'data: [DONE]\n\n',
     ]);
     const chunks = await collect(new OpenAIProvider({ apiKey: 'k' }).processStream({ modelId: 'gpt-4o', prompt: 'hi', tools: [weather] }));
-    const done = chunks[chunks.length - 1];
-    expect(done.done).toBe(true);
+    const done = (chunks[chunks.length - 1] as DoneChunk);
+    expect(done.type).toBe('done');
     expect(done.finishReason).toBe('tool_calls');
     expect(done.toolCalls).toEqual([{ id: 'call_a', name: 'get_weather', arguments: { city: 'Oslo' } }]);
   });
@@ -129,7 +129,7 @@ describe('Anthropic', () => {
       'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":6}}\n\n',
     ]);
     const chunks = await collect(new AnthropicProvider({ apiKey: 'k' }).processStream({ modelId: 'claude-3-5', prompt: 'hi', tools: [weather] }));
-    const done = chunks[chunks.length - 1];
+    const done = (chunks[chunks.length - 1] as DoneChunk);
     expect(done.toolCalls).toEqual([{ id: 'toolu_9', name: 'get_weather', arguments: { city: 'Oslo' } }]);
     expect(done.finishReason).toBe('tool_calls');
     expect(done.usage?.totalTokens).toBe(10);
@@ -164,7 +164,7 @@ describe('Gemini', () => {
       'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"Oslo"}}}]},"finishReason":"STOP"}]}\n\n',
     ]);
     const chunks = await collect(new GeminiProvider({ apiKey: 'k' }).processStream({ modelId: 'gemini-2.0-flash', prompt: 'hi', tools: [weather] }));
-    expect(chunks[chunks.length - 1].toolCalls).toEqual([{ id: 'call_0', name: 'get_weather', arguments: { city: 'Oslo' } }]);
+    expect((chunks[chunks.length - 1] as DoneChunk).toolCalls).toEqual([{ id: 'call_0', name: 'get_weather', arguments: { city: 'Oslo' } }]);
   });
 });
 
@@ -185,7 +185,7 @@ describe('Ollama', () => {
       '{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}\n',
     ]);
     const chunks = await collect(new OllamaProvider().processStream({ modelId: 'llama3.1', prompt: 'hi', tools: [weather] }));
-    const done = chunks[chunks.length - 1];
+    const done = (chunks[chunks.length - 1] as DoneChunk);
     expect(done.toolCalls).toEqual([{ id: 'call_0', name: 'get_weather', arguments: { city: 'Oslo' } }]);
     expect(done.finishReason).toBe('tool_calls');
   });
@@ -235,11 +235,13 @@ describe('factory maxSteps loop', () => {
         calls.push(req);
         const sawResult = req.messages?.some((m) => m.role === 'tool');
         if (sawResult) {
-          yield { text: 'It is ' };
-          yield { text: '21C.' };
-          yield { text: '', done: true, finishReason: 'stop', modelUsed: 'm' };
+          yield { type: 'text', text: 'It is ' };
+          yield { type: 'text', text: '21C.' };
+          yield { type: 'done', finishReason: 'stop', modelUsed: 'm' };
         } else {
-          yield { text: '', done: true, finishReason: 'tool_calls', modelUsed: 'm', toolCalls: [{ id: 'c1', name: 'get_weather', arguments: { city: 'Oslo' } }] };
+          const toolCall = { id: 'c1', name: 'get_weather', arguments: { city: 'Oslo' } };
+          yield { type: 'tool-call', toolCall, modelUsed: 'm' };
+          yield { type: 'done', finishReason: 'tool_calls', modelUsed: 'm', toolCalls: [toolCall] };
         }
       },
     };
@@ -291,16 +293,16 @@ describe('factory maxSteps loop', () => {
     const seen: AIRequest[] = [];
     const factory = new AIFactory({ providers: [stepProvider(seen)], discover: 'none' });
     const chunks = await collect(factory.processStream({ prompt: 'x', tools: [weather], maxSteps: 3 }));
-    expect(chunks.filter((c) => c.done)).toHaveLength(1);
-    expect(chunks[0]).toMatchObject({ type: 'tool-call', text: '', toolCall: { id: 'c1', name: 'get_weather' } });
-    expect(chunks.map((c) => c.text).join('')).toBe('It is 21C.');
-    expect(chunks[chunks.length - 1].finishReason).toBe('stop');
+    expect(chunks.filter((c) => c.type === 'done')).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ type: 'tool-call', toolCall: { id: 'c1', name: 'get_weather' } });
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('It is 21C.');
+    expect((chunks[chunks.length - 1] as DoneChunk).finishReason).toBe('stop');
     expect(seen[1].messages?.[2]).toMatchObject({ role: 'tool', toolCallId: 'c1' });
   });
 });
 
-test('nextStepRequest keeps history-based requests working', () => {
-  const next = nextStepRequest({ history: [{ role: 'user', content: 'a' }], prompt: 'b', tools: [weather] }, '', [{ id: '1', name: 'get_weather', arguments: {} }], [{ toolCallId: '1', name: 'get_weather', result: 1 }]);
-  expect(next.history).toBeUndefined();
+test('nextStepRequest folds prompt into messages', () => {
+  const next = nextStepRequest({ messages: [{ role: 'user', content: 'a' }], prompt: 'b', tools: [weather] }, '', [{ id: '1', name: 'get_weather', arguments: {} }], [{ toolCallId: '1', name: 'get_weather', result: 1 }]);
+  expect(next.prompt).toBeUndefined();
   expect(next.messages?.map((m) => m.role)).toEqual(['user', 'user', 'assistant', 'tool']);
 });

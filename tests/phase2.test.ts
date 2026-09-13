@@ -117,25 +117,25 @@ describe('hooks', () => {
     const seen: string[] = [];
     const good = makeProvider('a', {
       processStream: async function* () {
-        yield { text: 'x' };
-        yield { text: '', done: true };
+        yield { type: 'text', text: 'x' };
+        yield { type: 'done', finishReason: 'stop' };
       },
     });
     const hooks = {
-      onResponse: ({ response }: any) => void seen.push(`res:${response.done}`),
+      onResponse: ({ response }: any) => void seen.push(`res:${response.type}`),
       onError: ({ error, willRetry }: any) => void seen.push(`err:${error.code}:${willRetry}`),
     };
     for await (const _ of new AIFactory({ providers: [good], hooks }).processStream({ prompt: 'hi' })) void _;
     const bad = makeProvider('a', {
       processStream: async function* () {
-        yield { text: 'x' };
+        yield { type: 'text', text: 'x' };
         throw new Error('cut');
       },
     });
     await expect(async () => {
       for await (const _ of new AIFactory({ providers: [bad], hooks }).processStream({ prompt: 'hi' })) void _;
     }).rejects.toBeInstanceOf(AIError);
-    expect(seen).toEqual(['res:true', 'err:UNKNOWN:false']);
+    expect(seen).toEqual(["res:done", "err:UNKNOWN:false"]);
   });
 });
 

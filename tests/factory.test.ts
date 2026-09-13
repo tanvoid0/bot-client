@@ -2,7 +2,7 @@
 import { AIFactory } from '../src/ai-factory.js';
 import { AIError } from '../src/core/errors.js';
 import { HttpError } from '../src/core/http.js';
-import type { AIProvider, AIRequest, AIStreamChunk, LegacyStreamChunk } from '../src/types/index.js';
+import type { AIProvider, AIRequest, AIStreamChunk, DoneChunk } from '../src/types/index.js';
 
 /** Same shape as tests/unit-tests.ts `createMockProvider`, with overridable methods. */
 function makeProvider(id: string, overrides: Partial<AIProvider> = {}): AIProvider {
@@ -156,7 +156,6 @@ describe('response shape', () => {
     const res = await factory.process({ prompt: 'hi' });
     expect(typeof res.durationMs).toBe('number');
     expect(res.durationMs).toBeGreaterThanOrEqual(0);
-    expect(res.processingTime).toBe(res.durationMs);
   });
 });
 
@@ -248,11 +247,11 @@ describe('processStream', () => {
   test('a RATE_LIMIT thrown before the first chunk is retried, then succeeds', async () => {
     jest.useFakeTimers();
     let call = 0;
-    async function* gen(): AsyncGenerator<LegacyStreamChunk, void, void> {
+    async function* gen(): AsyncGenerator<AIStreamChunk, void, void> {
       call++;
       if (call === 1) throw AIError.from({ message: 'slow down', provider: 'x', code: 'RATE_LIMIT', retryAfterMs: 1000 });
-      yield { text: 'hello', done: false };
-      yield { text: '', done: true, finishReason: 'stop' };
+      yield { type: 'text', text: 'hello' };
+      yield { type: 'done', finishReason: 'stop' };
     }
     const provider: AIProvider = { ...makeProvider('x'), processStream: () => gen() };
     const factory = new AIFactory({ providers: [provider], retries: 2 });
@@ -260,29 +259,29 @@ describe('processStream', () => {
     await jest.advanceTimersByTimeAsync(1000);
     const chunks = await chunksPromise;
     expect(call).toBe(2);
-    expect(chunks.map((c) => c.text).join('')).toBe('hello');
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('hello');
   });
 
   test('a non-retryable error falls back to another provider mid-stream', async () => {
-    async function* failGen(): AsyncGenerator<LegacyStreamChunk, void, void> {
+    async function* failGen(): AsyncGenerator<AIStreamChunk, void, void> {
       throw AIError.from({ message: 'bad key', provider: 'a', code: 'AUTH' });
     }
-    async function* okGen(): AsyncGenerator<LegacyStreamChunk, void, void> {
-      yield { text: 'ok', done: false };
-      yield { text: '', done: true, finishReason: 'stop' };
+    async function* okGen(): AsyncGenerator<AIStreamChunk, void, void> {
+      yield { type: 'text', text: 'ok' };
+      yield { type: 'done', finishReason: 'stop' };
     }
     const a: AIProvider = { ...makeProvider('a'), processStream: () => failGen() };
     const b: AIProvider = { ...makeProvider('b'), processStream: () => okGen() };
     const factory = new AIFactory({ providers: [a, b], fallbackProvider: 'b' });
     const chunks = await collect(factory.processStream({ prompt: 'hi' }));
-    expect(chunks.map((c) => c.text).join('')).toBe('ok');
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('ok');
   });
 
   test('a failure after the first chunk is thrown, not retried', async () => {
     let calls = 0;
-    async function* gen(): AsyncGenerator<LegacyStreamChunk, void, void> {
+    async function* gen(): AsyncGenerator<AIStreamChunk, void, void> {
       calls++;
-      yield { text: 'partial', done: false };
+      yield { type: 'text', text: 'partial' };
       throw AIError.from({ message: 'overloaded', provider: 'x', code: 'OVERLOADED' });
     }
     const provider: AIProvider = { ...makeProvider('x'), processStream: () => gen() };
@@ -292,14 +291,14 @@ describe('processStream', () => {
   });
 
   test('the done chunk carries numeric durationMs and timeToFirstTokenMs', async () => {
-    async function* gen(): AsyncGenerator<LegacyStreamChunk, void, void> {
-      yield { text: 'hi', done: false };
-      yield { text: '', done: true, finishReason: 'stop' };
+    async function* gen(): AsyncGenerator<AIStreamChunk, void, void> {
+      yield { type: 'text', text: 'hi' };
+      yield { type: 'done', finishReason: 'stop' };
     }
     const provider: AIProvider = { ...makeProvider('x'), processStream: () => gen() };
     const factory = new AIFactory({ providers: [provider] });
     const chunks = await collect(factory.processStream({ prompt: 'hi' }));
-    const done = chunks[chunks.length - 1];
+    const done = (chunks[chunks.length - 1] as DoneChunk);
     expect(typeof done.durationMs).toBe('number');
     expect(typeof done.timeToFirstTokenMs).toBe('number');
   });

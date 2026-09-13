@@ -2,7 +2,7 @@ import { Readable } from 'stream';
 import { streamLines } from '../src/providers/base-provider.js';
 import { GeminiProvider } from '../src/providers/gemini-provider.js';
 import { OllamaProvider } from '../src/providers/ollama-provider.js';
-import type { AIStreamChunk } from '../src/index.js';
+import type { AIStreamChunk, DoneChunk } from '../src/index.js';
 
 /** Feeds bytes in exactly the pieces given, framing be damned. */
 const chunked = (pieces: string[]) => Readable.from(pieces.map((p) => Buffer.from(p)));
@@ -72,9 +72,9 @@ describe('GeminiProvider.processStream', () => {
       }),
     );
 
-    expect(chunks.map((c) => c.text).join('')).toBe('Hello there');
-    const last = chunks[chunks.length - 1];
-    expect(last.done).toBe(true);
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('Hello there');
+    const last = (chunks[chunks.length - 1] as DoneChunk);
+    expect(last.type).toBe('done');
     expect(last.finishReason).toBe('stop');
     expect(last.usage).toEqual({
       promptTokens: 7,
@@ -100,7 +100,7 @@ describe('GeminiProvider.processStream', () => {
     ]);
 
     const chunks = await collect(provider.processStream({ prompt: 'hi' }));
-    expect(chunks.map((c) => c.text).join('')).toBe('ok');
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('ok');
   });
 });
 
@@ -117,8 +117,8 @@ describe('OllamaProvider.processStream', () => {
       provider.processStream({ prompt: 'hi', modelId: 'gemma4', signal: controller.signal }),
     );
 
-    expect(chunks.map((c) => c.text).join('')).toBe('one two');
-    expect(chunks[chunks.length - 1].usage?.totalTokens).toBe(8);
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('one two');
+    expect((chunks[chunks.length - 1] as DoneChunk).usage?.totalTokens).toBe(8);
     // The caller's abort reaches the request.
     const sent = fetchMock.mock.calls[0][1]?.signal as AbortSignal;
     controller.abort();

@@ -263,11 +263,11 @@ export class OpenAICompatibleProvider extends BaseProvider {
         if (typeof frame?.model === 'string') modelUsed = frame.model;
         const choice = frame?.choices?.[0];
         const thinking = reasoningField(choice?.delta);
-        if (thinking) yield { type: 'reasoning', text: '', reasoning: thinking, modelUsed };
+        if (thinking) yield { type: 'reasoning', text: thinking, modelUsed };
         const text = choice?.delta?.content;
         if (typeof text === 'string' && text.length > 0) {
           const part = think.push(text);
-          if (part.reasoning) yield { type: 'reasoning', text: '', reasoning: part.reasoning, modelUsed };
+          if (part.reasoning) yield { type: 'reasoning', text: part.reasoning, modelUsed };
           if (part.text) yield { type: 'text', text: part.text, modelUsed };
         }
         for (const tc of choice?.delta?.tool_calls ?? []) {
@@ -289,14 +289,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
       throw this.toError(error, model);
     }
     const tail = think.flush();
-    if (tail.reasoning) yield { type: 'reasoning', text: '', reasoning: tail.reasoning, modelUsed };
+    if (tail.reasoning) yield { type: 'reasoning', text: tail.reasoning, modelUsed };
     if (tail.text) yield { type: 'text', text: tail.text, modelUsed };
     const toolCalls = calls.filter(Boolean).map((c, i) => ({ id: c.id ?? `call_${i}`, name: c.name ?? '', arguments: parseArgs(c.args) }));
-    for (const toolCall of toolCalls) yield { type: 'tool-call', text: '', toolCall, modelUsed };
+    for (const toolCall of toolCalls) yield { type: 'tool-call', toolCall, modelUsed };
     yield {
       type: 'done',
-      done: true,
-      text: '',
       modelUsed,
       usage,
       finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),

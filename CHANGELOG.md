@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — 2.0.0
+
+Breaking. See [MIGRATION.md](MIGRATION.md); every removed input fails with an `AIError` naming its replacement.
 
 ### Added
 
@@ -17,17 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ollama's "model does not support tools" 400 classifies as `UNSUPPORTED` with a hint.
 - `core/tools.ts` helpers exported for custom providers: `openaiTools`, `parseArgs`, `runTools`, `nextStepRequest`.
 - **Structured output**: `AIRequest.schema` takes a JSON Schema object or any Standard Schema (Zod, Valibot, ArkType, ...). It implies JSON mode; a JSON form of the schema (a plain object, or a library's `~standard.jsonSchema`) goes out as OpenAI `response_format: json_schema`, Gemini `responseSchema`, Ollama `format`, and into Anthropic's system nudge. The factory parses the answer (a stray ```json fence is tolerated) and validates it through the Standard Schema; the result is `AIResponse.object`, the raw text stays on `data`. Failures: `INVALID_JSON` (text in `errorInfo.details`), `SCHEMA_MISMATCH` (issues with paths in `details`, first one in the message), and `TRUNCATED` on `finishReason: 'length'`, which now covers `schema` as well as `jsonMode`. Streams ignore `schema`. A plain JSON Schema is not validated locally (no validator ships); `object` is the parsed value. `StandardSchemaV1` type and `jsonSchemaOf` / `parseJson` / `isStandardSchema` exported.
-- **Typed stream chunks**: every chunk carries `type: 'text' | 'reasoning' | 'tool-call' | 'done'` (`TextChunk`, `ReasoningChunk`, `ToolCallChunk`, `DoneChunk`, `AIStreamChunk` is their union). A `tool-call` chunk is emitted per completed call before `done`. The 1.x fields stay: `text` on every chunk (empty unless `type` is `'text'`), `done: true` on the last one, `reasoning` / `usage` / `finishReason` / `toolCalls` where they were, and each member types the others' fields as `undefined`, so existing code that appends `chunk.text`, checks `chunk.done` or reads `chunk.usage` compiles and runs unchanged; no `legacyChunks` flag is needed. A custom provider may still yield the 1.x shape (`LegacyStreamChunk`); the factory stamps `type` and lifts `toolCalls` on its done chunk into `tool-call` chunks. A non-streaming provider's answer now arrives as a `text` chunk followed by `done`, not text on the `done` chunk. `chunksOf(response)` exported.
+- **Typed stream chunks**: `AIStreamChunk` is `TextChunk | ReasoningChunk | ToolCallChunk | DoneChunk`, discriminated by `type`. `text` and `reasoning` chunks carry `text`; a `tool-call` chunk is emitted per completed call before `done`; `done` carries `finishReason`, `usage`, `toolCalls`, `requestId`, `durationMs`, `timeToFirstTokenMs`. A non-streaming provider's answer arrives as `text` then `done`. `chunksOf(response)` exported.
 - `@tanvoid0/bot-client/core`: the factory, errors, types and helpers without the built-in providers. `AIFactory` from `./core` has no default providers (pass `providers`); `./core` plus one provider subpath bundles to 11.5 kB gz, against 17 kB for `.`. The `.` entry is unchanged: its `AIFactory` still defaults to all five providers, and `aiFactory` still works with no config.
 
 ### Changed
 
 - `AIRequest.prompt` is optional (`string | undefined`); a custom provider reading it as a string needs a `?? ''`. `buildChatMessages` returns `Message[]`, whose `content` may be a parts array.
 
-### Deprecated
+### Removed
 
-- `AIRequest.history`: use `messages`; ignored when `messages` is given. Removed in 3.0.
-- `AIRequest.responseSchema` (Gemini-only passthrough): use `schema`. Removed in 3.0.
+- `AIRequest.history` (use `messages`), `responseSchema` (use `schema`), `usageContext`. Passing any of them fails with `INVALID_REQUEST` and a hint.
+- `AIResponse.tokensUsed` / `promptTokens` / `completionTokens` (use `usage`), `processingTime` (use `durationMs`), `confidence`, `cost`, `modelCapabilities`, `suggestedImprovements`, `timestamp`.
+- The 1.x stream chunk shape. A custom provider yielding `{ text, done }` makes the factory throw `INVALID_RESPONSE` on the first chunk.
+- `BaseProvider.createResponse` and `handleError`; `ChatMessage`; the unused types `ConversationHistory`, `AIProviderConfig`, `ProviderType`, `ProviderConfig`, `ContentGenerationRequest`, `AnalysisRequest`, `CodeGenerationRequest`, `ConversationRequest`, `PostProcessingOptions`, `ModelCapabilities`, `ProcessingMetrics`.
 
 ### Fixed
 

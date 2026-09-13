@@ -312,25 +312,23 @@ export class OllamaProvider extends BaseProvider {
         toolCalls.push(...toolCallsOf(parsed?.message?.tool_calls, toolCalls.length));
         const thinking = parsed?.message?.thinking;
         if (typeof thinking === 'string' && thinking.length > 0) {
-          yield { type: 'reasoning', text: '', reasoning: thinking, modelUsed: model };
+          yield { type: 'reasoning', text: thinking, modelUsed: model };
         }
         const content = parsed?.message?.content;
         if (typeof content === 'string' && content.length > 0) {
           const part = think.push(content);
-          if (part.reasoning) yield { type: 'reasoning', text: '', reasoning: part.reasoning, modelUsed: model };
+          if (part.reasoning) yield { type: 'reasoning', text: part.reasoning, modelUsed: model };
           if (part.text) yield { type: 'text', text: part.text, modelUsed: model };
         }
         if (parsed?.done) {
           const tail = think.flush();
-          if (tail.reasoning) yield { type: 'reasoning', text: '', reasoning: tail.reasoning, modelUsed: model };
+          if (tail.reasoning) yield { type: 'reasoning', text: tail.reasoning, modelUsed: model };
           if (tail.text) yield { type: 'text', text: tail.text, modelUsed: model };
           const promptTokens = parsed.prompt_eval_count;
           const completionTokens = parsed.eval_count;
-          for (const toolCall of toolCalls) yield { type: 'tool-call', text: '', toolCall, modelUsed: model };
+          for (const toolCall of toolCalls) yield { type: 'tool-call', toolCall, modelUsed: model };
           yield {
             type: 'done',
-            done: true,
-            text: '',
             modelUsed: model,
             finishReason: toolCalls.length ? 'tool_calls' : doneReason(parsed.done_reason),
             ...(toolCalls.length && { toolCalls }),

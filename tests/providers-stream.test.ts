@@ -2,7 +2,7 @@
 import { OpenAIProvider } from '../src/providers/openai-provider.js';
 import { AnthropicProvider } from '../src/providers/anthropic-provider.js';
 import { LMStudioProvider } from '../src/providers/lmstudio-provider.js';
-import type { AIStreamChunk } from '../src/index.js';
+import type { AIStreamChunk, DoneChunk } from '../src/index.js';
 
 /** `fetch` answering 200 with the pieces as the streamed body (same helper as tests/streaming.test.ts). */
 function stubStream(pieces: string[]) {
@@ -35,9 +35,9 @@ describe('OpenAIProvider streaming', () => {
     const provider = new OpenAIProvider({ apiKey: 'k' });
     const chunks = await collect(provider.processStream({ prompt: 'hi', modelId: 'gpt-4o' }));
 
-    expect(chunks.map((c) => c.text).join('')).toBe('Hello');
-    const last = chunks[chunks.length - 1];
-    expect(last.done).toBe(true);
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('Hello');
+    const last = (chunks[chunks.length - 1] as DoneChunk);
+    expect(last.type).toBe('done');
     expect(last.finishReason).toBe('stop');
     expect(last.usage).toEqual({ promptTokens: 3, completionTokens: 2, totalTokens: 5 });
 
@@ -62,9 +62,9 @@ describe('AnthropicProvider streaming', () => {
     const provider = new AnthropicProvider({ apiKey: 'k' });
     const chunks = await collect(provider.processStream({ prompt: 'hi', modelId: 'claude-3-5' }));
 
-    expect(chunks.map((c) => c.text).join('')).toBe('Hi there');
-    const last = chunks[chunks.length - 1];
-    expect(last.done).toBe(true);
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('Hi there');
+    const last = (chunks[chunks.length - 1] as DoneChunk);
+    expect(last.type).toBe('done');
     expect(last.finishReason).toBe('length');
     expect(last.usage).toEqual({ promptTokens: 10, completionTokens: 4, totalTokens: 14 });
     expect(last.modelUsed).toBe('claude-x');
@@ -112,7 +112,7 @@ describe('LMStudioProvider streaming', () => {
     ]);
     const provider = new LMStudioProvider({ models: ['local-model'] });
     const chunks = await collect(provider.processStream({ prompt: 'hi' }));
-    expect(chunks.map((c) => c.text).join('')).toBe('Hi');
-    expect(chunks[chunks.length - 1].finishReason).toBe('stop');
+    expect(chunks.map((c) => (c.type === 'text' ? c.text : '')).join('')).toBe('Hi');
+    expect((chunks[chunks.length - 1] as DoneChunk).finishReason).toBe('stop');
   });
 });

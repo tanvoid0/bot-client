@@ -23,8 +23,8 @@ async function collect(stream: AsyncGenerator<AIStreamChunk, void, void>) {
   for await (const c of stream) chunks.push(c);
   return {
     chunks,
-    text: chunks.map((c) => c.text).join(''),
-    reasoning: chunks.map((c) => c.reasoning ?? '').join(''),
+    text: chunks.map((c) => (c.type === 'text' ? c.text : '')).join(''),
+    reasoning: chunks.map((c) => (c.type === 'reasoning' ? c.text : '')).join(''),
   };
 }
 
@@ -83,8 +83,7 @@ describe('OpenAI format, reasoning as a field', () => {
     const out = await collect(provider().processStream({ prompt: 'q' }));
     expect(out.reasoning).toBe('Let me think.');
     expect(out.text).toBe('The answer.');
-    expect(out.chunks.filter((c) => c.reasoning).every((c) => c.text === '')).toBe(true);
-    expect(out.chunks[out.chunks.length - 1]).toMatchObject({ done: true, finishReason: 'stop' });
+    expect(out.chunks[out.chunks.length - 1]).toMatchObject({ type: 'done', finishReason: 'stop' });
   });
 });
 

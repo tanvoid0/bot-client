@@ -89,10 +89,10 @@ export function toolResultContent(r: ToolResult): string {
  */
 export function nextStepRequest(req: AIRequest, text: string, calls: ToolCall[], results: ToolResult[]): AIRequest {
   const messages: Message[] = [
-    ...((req.messages ?? req.history ?? []) as Message[]),
+    ...(req.messages ?? []),
     ...(req.prompt !== undefined ? [{ role: 'user', content: req.prompt } as Message] : []),
     { role: 'assistant', content: text, toolCalls: calls },
     ...results.map((r): Message => ({ role: 'tool', toolCallId: r.toolCallId, name: r.name, content: toolResultContent(r) })),
   ];
-  return { ...req, messages, prompt: undefined, history: undefined, toolChoice: undefined };
+  return { ...req, messages, prompt: undefined, toolChoice: undefined };
 }

@@ -291,7 +291,7 @@ export class AnthropicProvider extends BaseProvider {
           if (frame.delta?.type === 'text_delta' && typeof text === 'string' && text.length > 0) yield { type: 'text', text, modelUsed };
           const thinking = frame.delta?.thinking;
           if (frame.delta?.type === 'thinking_delta' && typeof thinking === 'string' && thinking.length > 0)
-            yield { type: 'reasoning', text: '', reasoning: thinking, modelUsed };
+            yield { type: 'reasoning', text: thinking, modelUsed };
         } else if (type === 'message_delta') {
           if (frame.delta?.stop_reason) finish = finishReason(frame.delta.stop_reason);
           if (frame.usage?.output_tokens !== undefined) usage.completionTokens = frame.usage.output_tokens;
@@ -302,11 +302,9 @@ export class AnthropicProvider extends BaseProvider {
     }
     usage.totalTokens = totalTokens(usage.promptTokens, usage.completionTokens);
     const toolCalls: ToolCall[] = calls.map((c) => ({ id: c.id, name: c.name, arguments: c.json ? parseArgs(c.json) : {} }));
-    for (const toolCall of toolCalls) yield { type: 'tool-call', text: '', toolCall, modelUsed };
+    for (const toolCall of toolCalls) yield { type: 'tool-call', toolCall, modelUsed };
     yield {
       type: 'done',
-      done: true,
-      text: '',
       modelUsed,
       usage,
       finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),

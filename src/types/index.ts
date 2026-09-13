@@ -19,7 +19,7 @@ export interface AIProvider {
    * still satisfies it; `BaseProvider` supplies a one-chunk implementation, so
    * every provider that extends it can be consumed as a stream regardless.
    */
-  processStream?(request: AIRequest): AsyncGenerator<AIStreamChunk | LegacyStreamChunk, void, void>;
+  processStream?(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void>;
   isModelSupported(modelId: string): boolean;
   testConnection(): Promise<boolean>;
   discoverModels(): Promise<string[]>;
@@ -28,33 +28,20 @@ export interface AIProvider {
 /** Why the model stopped writing. `length` means it hit `maxTokens`. */
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown';
 
-/**
- * One piece of a streamed answer, discriminated by `type`.
- *
- * Every chunk still carries `text` (empty unless `type` is `'text'`) and the
- * `done` chunk still has `done: true`, so 1.x code that appends `chunk.text`
- * and checks `chunk.done` keeps working; `type` is the way to switch.
- */
-export type AIStreamChunk = Only<TextChunk> | Only<ReasoningChunk> | Only<ToolCallChunk> | Only<DoneChunk>;
-
-/** A member with every other member's fields typed `undefined`, so `chunk.usage` reads on the union without narrowing first. */
-type Only<T> = T & { [K in Exclude<ChunkKeys, keyof T>]?: undefined };
-type ChunkKeys = keyof TextChunk | keyof ReasoningChunk | keyof ToolCallChunk | keyof DoneChunk;
+/** One piece of a streamed answer, discriminated by `type`. Switch on it; only `text` chunks are the answer. */
+export type AIStreamChunk = TextChunk | ReasoningChunk | ToolCallChunk | DoneChunk;
 
 /** What was written since the previous chunk, never the whole answer so far. */
 export interface TextChunk {
   type: 'text';
   text: string;
-  done?: false;
   modelUsed?: string;
 }
 
 /** Thinking written since the previous chunk, when the model exposes it. */
 export interface ReasoningChunk {
   type: 'reasoning';
-  reasoning: string;
-  text: '';
-  done?: false;
+  text: string;
   modelUsed?: string;
 }
 
@@ -62,16 +49,12 @@ export interface ReasoningChunk {
 export interface ToolCallChunk {
   type: 'tool-call';
   toolCall: ToolCall;
-  text: '';
-  done?: false;
   modelUsed?: string;
 }
 
 /** The last chunk: why the model stopped and, where the provider reports it, the token usage for the whole call. */
 export interface DoneChunk {
   type: 'done';
-  done: true;
-  text: '';
   finishReason: FinishReason;
   usage?: TokenUsage;
   modelUsed?: string;
@@ -80,20 +63,8 @@ export interface DoneChunk {
   requestId?: string;
   /** Wall time for the whole stream (set by the factory). */
   durationMs?: number;
-  /** ms until the first non-empty text chunk (set by the factory). */
+  /** ms until the first `text` chunk (set by the factory). */
   timeToFirstTokenMs?: number;
-}
-
-/** The 1.x chunk shape a custom provider may still yield; the factory stamps `type` on it. */
-export interface LegacyStreamChunk {
-  text: string;
-  reasoning?: string;
-  done?: boolean;
-  usage?: TokenUsage;
-  modelUsed?: string;
-  finishReason?: FinishReason;
-  toolCalls?: ToolCall[];
-  requestId?: string;
 }
 
 export interface TextPart {
@@ -188,10 +159,6 @@ export interface AIRequest {
    * with `INVALID_JSON` or `SCHEMA_MISMATCH`. Not applied to streams.
    */
   schema?: StandardSchemaV1 | Record<string, unknown>;
-  /** @deprecated Use `schema`. Gemini-only passthrough; removed in 3.0. */
-  responseSchema?: unknown;
-  /** @deprecated Use `messages`; ignored when `messages` is given. Removed in 3.0. */
-  history?: ConversationHistory[];
   metadata?: Record<string, any>;
   /** Aborts an in-flight request/stream. */
   signal?: AbortSignal;
@@ -220,13 +187,6 @@ export interface AIRequest {
    * OpenAI-format host). Whatever you put here wins over what the client sets.
    */
   providerOptions?: Record<string, unknown>;
-  /** @deprecated Unused; removed in 2.0. */
-  usageContext?: {
-    taskType: 'content-generation' | 'analysis' | 'conversation' | 'code-generation' | 'custom';
-    priority: 'low' | 'medium' | 'high';
-    costSensitive?: boolean;
-    qualityPreference?: 'speed' | 'balanced' | 'quality';
-  };
 }
 
 // AI Response Interface
@@ -249,32 +209,14 @@ export interface AIResponse {
   /** The rounds the factory ran before this answer, when `maxSteps > 1` and at least one tool ran. */
   steps?: Step[];
   usage?: TokenUsage;
-  /** Total tokens billed, when the provider reports them. Same as `usage.totalTokens`. */
-  tokensUsed?: number;
-  /** Input tokens, when the provider reports them separately. Same as `usage.promptTokens`. */
-  promptTokens?: number;
-  /** Output tokens, when the provider reports them separately. Same as `usage.completionTokens`. */
-  completionTokens?: number;
   /** Provider request id header, when sent. */
   requestId?: string;
   /** Wall time of the whole call, including retries and fallback. */
   durationMs?: number;
-  /** @deprecated Same value as `durationMs`; removed in 2.0. */
-  processingTime?: number;
   /** Retries spent before this answer. */
   retryCount?: number;
   /** True when a fallback provider answered. */
   fallbackUsed?: boolean;
-  /** @deprecated Never computed; removed in 2.0. */
-  cost?: number;
-  /** @deprecated Never computed; removed in 2.0. */
-  modelCapabilities?: string[];
-  /** @deprecated Never computed; removed in 2.0. */
-  suggestedImprovements?: string[];
-  /** @deprecated Never computed; removed in 2.0. */
-  confidence?: number;
-  /** @deprecated Removed in 2.0. */
-  timestamp?: Date;
 }
 
 /** Token counts as reported by a provider. Fields are absent when unreported. */
@@ -284,21 +226,6 @@ export interface TokenUsage {
   totalTokens?: number;
   /** Prompt tokens served from the provider's cache, when reported. */
   cachedTokens?: number;
-}
-
-// Conversation History
-export interface ConversationHistory {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp?: Date;
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface AIProviderConfig {
-  defaultModel?: string;
-  defaultTemperature?: number;
-  defaultMaxTokens?: number;
-  supportedModels?: string[];
 }
 
 // Optional logger for factory and providers (all methods optional)
@@ -373,81 +300,3 @@ export interface BaseProviderConfig {
 // Provider Types
 export type ProviderType = 'openai' | 'anthropic' | 'ollama' | 'lmstudio' | 'gemini' | 'custom';
 
-/** @deprecated Unused; removed in 2.0. */
-export interface ProviderConfig {
-  type: ProviderType;
-  config: {
-    name: string;
-    apiKey?: string;
-    host?: string;
-    port?: number;
-    baseURL?: string;
-    timeout?: number;
-    maxTokens?: number;
-    temperature?: number;
-    customHeaders?: Record<string, string>;
-  };
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface ContentGenerationRequest extends AIRequest {
-  taskType: 'content-generation';
-  contentType: 'article' | 'blog' | 'email' | 'social-media' | 'documentation';
-  tone?: 'professional' | 'casual' | 'formal' | 'creative';
-  targetAudience?: string;
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface AnalysisRequest extends AIRequest {
-  taskType: 'analysis';
-  analysisType: 'sentiment' | 'summary' | 'classification' | 'extraction';
-  outputFormat?: 'text' | 'json' | 'structured';
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface CodeGenerationRequest extends AIRequest {
-  taskType: 'code-generation';
-  language: string;
-  framework?: string;
-  includeTests?: boolean;
-  includeComments?: boolean;
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface ConversationRequest extends AIRequest {
-  taskType: 'conversation';
-  conversationType: 'chat' | 'support' | 'tutoring' | 'interview';
-  personality?: string;
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface PostProcessingOptions {
-  extractJson?: boolean;
-  formatOutput?: 'markdown' | 'html' | 'plain' | 'json';
-  validateStructure?: boolean;
-  sanitize?: boolean;
-  translate?: string;
-  summarize?: boolean;
-  keywordExtraction?: boolean;
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface ModelCapabilities {
-  reasoning: 'basic' | 'advanced' | 'expert';
-  creativity: 'low' | 'medium' | 'high';
-  speed: 'slow' | 'medium' | 'fast';
-  cost: 'free' | 'low' | 'medium' | 'high';
-  contextLength: number;
-  supportedTasks: string[];
-}
-
-/** @deprecated Unused; removed in 2.0. */
-export interface ProcessingMetrics {
-  startTime: number;
-  endTime: number;
-  processingTime: number;
-  tokensUsed: number;
-  cost: number;
-  providerLatency: number;
-  modelLatency: number;
-}
