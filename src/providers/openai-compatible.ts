@@ -1,4 +1,4 @@
-import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
+import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, totalTokens } from './base-provider.js';
 import { openaiToolChoice, openaiTools, parseArgs, recoverLeakedToolCalls, stringifyArgs } from '../core/tools.js';
@@ -245,7 +245,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
     }
 
     let finish: FinishReason | undefined;
-    let usage: AIStreamChunk['usage'];
+    let usage: TokenUsage | undefined;
     let modelUsed = model;
     const think = new ThinkFilter();
     // Tool call deltas arrive by index: the id and name first, then argument text in pieces.
@@ -263,12 +263,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
         if (typeof frame?.model === 'string') modelUsed = frame.model;
         const choice = frame?.choices?.[0];
         const thinking = reasoningField(choice?.delta);
-        if (thinking) yield { text: '', reasoning: thinking, modelUsed };
+        if (thinking) yield { type: 'reasoning', text: '', reasoning: thinking, modelUsed };
         const text = choice?.delta?.content;
         if (typeof text === 'string' && text.length > 0) {
           const part = think.push(text);
-          if (part.reasoning) yield { text: '', reasoning: part.reasoning, modelUsed };
-          if (part.text) yield { text: part.text, modelUsed };
+          if (part.reasoning) yield { type: 'reasoning', text: '', reasoning: part.reasoning, modelUsed };
+          if (part.text) yield { type: 'text', text: part.text, modelUsed };
         }
         for (const tc of choice?.delta?.tool_calls ?? []) {
           const slot = (calls[tc.index ?? calls.length] ??= { args: '' });
@@ -289,12 +289,14 @@ export class OpenAICompatibleProvider extends BaseProvider {
       throw this.toError(error, model);
     }
     const tail = think.flush();
-    if (tail.reasoning) yield { text: '', reasoning: tail.reasoning, modelUsed };
-    if (tail.text) yield { text: tail.text, modelUsed };
+    if (tail.reasoning) yield { type: 'reasoning', text: '', reasoning: tail.reasoning, modelUsed };
+    if (tail.text) yield { type: 'text', text: tail.text, modelUsed };
     const toolCalls = calls.filter(Boolean).map((c, i) => ({ id: c.id ?? `call_${i}`, name: c.name ?? '', arguments: parseArgs(c.args) }));
+    for (const toolCall of toolCalls) yield { type: 'tool-call', text: '', toolCall, modelUsed };
     yield {
-      text: '',
+      type: 'done',
       done: true,
+      text: '',
       modelUsed,
       usage,
       finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),

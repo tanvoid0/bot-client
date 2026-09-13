@@ -41,6 +41,24 @@ export function buildChatMessages(request: AIRequest): Message[] {
   return messages;
 }
 
+/** A one-shot answer as the chunks a stream would have produced. */
+export function* chunksOf(response: AIResponse): Generator<AIStreamChunk, void, void> {
+  const modelUsed = response.modelUsed;
+  if (response.reasoning) yield { type: 'reasoning', text: '', reasoning: response.reasoning, modelUsed };
+  if (response.data) yield { type: 'text', text: response.data, modelUsed };
+  for (const toolCall of response.toolCalls ?? []) yield { type: 'tool-call', text: '', toolCall, modelUsed };
+  yield {
+    type: 'done',
+    done: true,
+    text: '',
+    modelUsed,
+    usage: response.usage,
+    finishReason: response.finishReason ?? 'unknown',
+    ...(response.toolCalls && { toolCalls: response.toolCalls }),
+    ...(response.requestId && { requestId: response.requestId }),
+  };
+}
+
 /** A message's content as parts, so providers handle one shape. */
 export function partsOf(content: string | MessagePart[]): MessagePart[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : content;
@@ -152,15 +170,7 @@ export abstract class BaseProvider implements AIProvider {
     if (!response.success) {
       throw response.errorInfo ?? this.error('UNKNOWN', response.error ?? `${this.providerId} returned no response`);
     }
-    if (response.reasoning) yield { text: '', reasoning: response.reasoning, modelUsed: response.modelUsed };
-    yield {
-      text: response.data ?? '',
-      done: true,
-      modelUsed: response.modelUsed,
-      usage: response.usage,
-      finishReason: response.finishReason,
-      requestId: response.requestId,
-    };
+    yield* chunksOf(response);
   }
 
   get supportedModels(): string[] {

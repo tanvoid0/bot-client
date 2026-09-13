@@ -1,9 +1,19 @@
-import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, Hooks, Step, ToolCall } from './types/index.js';
+import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, DoneChunk, Hooks, LegacyStreamChunk, Step, ToolCall } from './types/index.js';
+import { chunksOf } from './providers/base-provider.js';
 import { canRun, nextStepRequest, runTools } from './core/tools.js';
 import { parseJson, validate, wantsJson } from './core/schema.js';
 import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
 import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
 import { guessProvider, splitExplicit } from './core/catalog.js';
+
+/** A chunk from a 1.x-shaped custom provider, given its `type`; typed chunks pass through. */
+function typed(chunk: AIStreamChunk | LegacyStreamChunk): AIStreamChunk {
+  if ('type' in chunk && chunk.type) return chunk;
+  const { done, reasoning, text, modelUsed, usage, finishReason, toolCalls, requestId } = chunk as LegacyStreamChunk;
+  if (done) return { type: 'done', done: true, text: '', modelUsed, usage, finishReason: finishReason ?? 'unknown', toolCalls, requestId };
+  if (reasoning) return { type: 'reasoning', text: '', reasoning, modelUsed };
+  return { type: 'text', text, modelUsed };
+}
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -347,10 +357,11 @@ export class AIFactory {
     for (let step = 1; ; step++) {
       let text = '';
       let calls: ToolCall[] = [];
-      let done: AIStreamChunk | undefined;
+      let done: DoneChunk | undefined;
+      // Tool-call chunks pass straight through; only the done chunk is held back while the loop continues.
       for await (const chunk of this.streamOnce(req)) {
         text += chunk.text;
-        if (!chunk.done) {
+        if (chunk.type !== 'done') {
           yield chunk;
           continue;
         }
@@ -361,8 +372,6 @@ export class AIFactory {
         if (done) yield done;
         return;
       }
-      // Not the end: the calls go out on a plain chunk and the next step's answer follows.
-      yield { text: '', toolCalls: calls, modelUsed: done?.modelUsed };
       const results = await runTools(req.tools!, calls, req.signal);
       req = nextStepRequest(req, text, calls, results);
     }
@@ -383,7 +392,7 @@ export class AIFactory {
         const gen = provider.processStream
           ? provider.processStream(request)
           : this.oneChunk(provider, request);
-        let first: IteratorResult<AIStreamChunk, void>;
+        let first: IteratorResult<AIStreamChunk | LegacyStreamChunk, void>;
         await this.hook('onRequest', { provider: provider.providerId, model: request.modelId, request });
         try {
           first = await gen.next();
@@ -409,21 +418,13 @@ export class AIFactory {
   private async *oneChunk(provider: AIProvider, request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
     const result = await provider.process(request);
     if (!result.success) throw result.errorInfo ?? new AIError(result.error ?? 'AI request failed', provider.providerId);
-    if (result.reasoning) yield { text: '', reasoning: result.reasoning, modelUsed: result.modelUsed };
-    yield {
-      text: result.data ?? '',
-      done: true,
-      modelUsed: result.modelUsed,
-      usage: result.usage,
-      finishReason: result.finishReason,
-      requestId: result.requestId,
-    };
+    yield* chunksOf(result);
   }
 
   /** Relays chunks, stamping timings on the `done` chunk and classifying anything thrown. */
   private async *drain(
-    first: IteratorResult<AIStreamChunk, void>,
-    gen: AsyncGenerator<AIStreamChunk, void, void>,
+    first: IteratorResult<AIStreamChunk | LegacyStreamChunk, void>,
+    gen: AsyncGenerator<AIStreamChunk | LegacyStreamChunk, void, void>,
     provider: AIProvider,
     model: string | undefined,
     started: number
@@ -432,11 +433,13 @@ export class AIFactory {
     let r = first;
     try {
       while (!r.done) {
-        const chunk = r.value;
+        const chunk = typed(r.value);
         if (ttft === undefined && chunk.text) ttft = Math.round(now() - started);
-        if (chunk.done) {
+        if (chunk.type === 'done') {
+          // A 1.x provider lists its calls only on the done chunk; surface them as tool-call chunks first.
+          if (!('type' in r.value)) for (const toolCall of chunk.toolCalls ?? []) yield { type: 'tool-call', text: '', toolCall, modelUsed: chunk.modelUsed };
           const durationMs = Math.round(now() - started);
-          const done = { ...chunk, durationMs, timeToFirstTokenMs: ttft };
+          const done: DoneChunk = { ...chunk, durationMs, timeToFirstTokenMs: ttft };
           await this.hook('onResponse', { provider: provider.providerId, model, response: done, durationMs });
           yield done;
         } else {

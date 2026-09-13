@@ -2,7 +2,7 @@
 import { AIFactory } from '../src/ai-factory.js';
 import { AIError } from '../src/core/errors.js';
 import { HttpError } from '../src/core/http.js';
-import type { AIProvider, AIRequest, AIStreamChunk } from '../src/types/index.js';
+import type { AIProvider, AIRequest, AIStreamChunk, LegacyStreamChunk } from '../src/types/index.js';
 
 /** Same shape as tests/unit-tests.ts `createMockProvider`, with overridable methods. */
 function makeProvider(id: string, overrides: Partial<AIProvider> = {}): AIProvider {
@@ -248,7 +248,7 @@ describe('processStream', () => {
   test('a RATE_LIMIT thrown before the first chunk is retried, then succeeds', async () => {
     jest.useFakeTimers();
     let call = 0;
-    async function* gen(): AsyncGenerator<AIStreamChunk, void, void> {
+    async function* gen(): AsyncGenerator<LegacyStreamChunk, void, void> {
       call++;
       if (call === 1) throw AIError.from({ message: 'slow down', provider: 'x', code: 'RATE_LIMIT', retryAfterMs: 1000 });
       yield { text: 'hello', done: false };
@@ -264,10 +264,10 @@ describe('processStream', () => {
   });
 
   test('a non-retryable error falls back to another provider mid-stream', async () => {
-    async function* failGen(): AsyncGenerator<AIStreamChunk, void, void> {
+    async function* failGen(): AsyncGenerator<LegacyStreamChunk, void, void> {
       throw AIError.from({ message: 'bad key', provider: 'a', code: 'AUTH' });
     }
-    async function* okGen(): AsyncGenerator<AIStreamChunk, void, void> {
+    async function* okGen(): AsyncGenerator<LegacyStreamChunk, void, void> {
       yield { text: 'ok', done: false };
       yield { text: '', done: true, finishReason: 'stop' };
     }
@@ -280,7 +280,7 @@ describe('processStream', () => {
 
   test('a failure after the first chunk is thrown, not retried', async () => {
     let calls = 0;
-    async function* gen(): AsyncGenerator<AIStreamChunk, void, void> {
+    async function* gen(): AsyncGenerator<LegacyStreamChunk, void, void> {
       calls++;
       yield { text: 'partial', done: false };
       throw AIError.from({ message: 'overloaded', provider: 'x', code: 'OVERLOADED' });
@@ -292,7 +292,7 @@ describe('processStream', () => {
   });
 
   test('the done chunk carries numeric durationMs and timeToFirstTokenMs', async () => {
-    async function* gen(): AsyncGenerator<AIStreamChunk, void, void> {
+    async function* gen(): AsyncGenerator<LegacyStreamChunk, void, void> {
       yield { text: 'hi', done: false };
       yield { text: '', done: true, finishReason: 'stop' };
     }

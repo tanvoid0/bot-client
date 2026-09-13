@@ -299,10 +299,10 @@ export class GeminiProvider extends BaseProvider {
         if (typeof parsed?.modelVersion === 'string') modelUsed = parsed.modelVersion;
         const candidate = parsed?.candidates?.[0];
         const { text, reasoning } = textOf(candidate);
-        if (reasoning) yield { text: '', reasoning, modelUsed };
+        if (reasoning) yield { type: 'reasoning', text: '', reasoning, modelUsed };
         if (text) {
           wrote = true;
-          yield { text, modelUsed };
+          yield { type: 'text', text, modelUsed };
         }
         toolCalls.push(...toolCallsOf(candidate, toolCalls.length));
         if (candidate?.finishReason) finish = finishReason(candidate.finishReason);
@@ -314,9 +314,11 @@ export class GeminiProvider extends BaseProvider {
     if (finish === 'content_filter' && !wrote) {
       throw this.error('CONTENT_FILTER', 'Answer blocked by Gemini', { model });
     }
+    for (const toolCall of toolCalls) yield { type: 'tool-call', text: '', toolCall, modelUsed };
     yield {
-      text: '',
+      type: 'done',
       done: true,
+      text: '',
       modelUsed,
       usage,
       finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),

@@ -19,7 +19,7 @@ export interface AIProvider {
    * still satisfies it; `BaseProvider` supplies a one-chunk implementation, so
    * every provider that extends it can be consumed as a stream regardless.
    */
-  processStream?(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void>;
+  processStream?(request: AIRequest): AsyncGenerator<AIStreamChunk | LegacyStreamChunk, void, void>;
   isModelSupported(modelId: string): boolean;
   testConnection(): Promise<boolean>;
   discoverModels(): Promise<string[]>;
@@ -29,29 +29,71 @@ export interface AIProvider {
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown';
 
 /**
- * One piece of a streamed answer.
+ * One piece of a streamed answer, discriminated by `type`.
  *
- * [text] is what was written since the previous chunk, never the whole answer
- * so far -- a consumer appends. The final chunk carries `done` and, where the
- * provider reports it, the token usage for the whole call.
+ * Every chunk still carries `text` (empty unless `type` is `'text'`) and the
+ * `done` chunk still has `done: true`, so 1.x code that appends `chunk.text`
+ * and checks `chunk.done` keeps working; `type` is the way to switch.
  */
-export interface AIStreamChunk {
+export type AIStreamChunk = Only<TextChunk> | Only<ReasoningChunk> | Only<ToolCallChunk> | Only<DoneChunk>;
+
+/** A member with every other member's fields typed `undefined`, so `chunk.usage` reads on the union without narrowing first. */
+type Only<T> = T & { [K in Exclude<ChunkKeys, keyof T>]?: undefined };
+type ChunkKeys = keyof TextChunk | keyof ReasoningChunk | keyof ToolCallChunk | keyof DoneChunk;
+
+/** What was written since the previous chunk, never the whole answer so far. */
+export interface TextChunk {
+  type: 'text';
   text: string;
-  /** Thinking written since the previous chunk, when the model exposes it. `text` is empty on such chunks. */
+  done?: false;
+  modelUsed?: string;
+}
+
+/** Thinking written since the previous chunk, when the model exposes it. */
+export interface ReasoningChunk {
+  type: 'reasoning';
+  reasoning: string;
+  text: '';
+  done?: false;
+  modelUsed?: string;
+}
+
+/** One complete tool call, once its arguments have all arrived. Also listed on the `done` chunk. */
+export interface ToolCallChunk {
+  type: 'tool-call';
+  toolCall: ToolCall;
+  text: '';
+  done?: false;
+  modelUsed?: string;
+}
+
+/** The last chunk: why the model stopped and, where the provider reports it, the token usage for the whole call. */
+export interface DoneChunk {
+  type: 'done';
+  done: true;
+  text: '';
+  finishReason: FinishReason;
+  usage?: TokenUsage;
+  modelUsed?: string;
+  toolCalls?: ToolCall[];
+  /** When the provider sends one. */
+  requestId?: string;
+  /** Wall time for the whole stream (set by the factory). */
+  durationMs?: number;
+  /** ms until the first non-empty text chunk (set by the factory). */
+  timeToFirstTokenMs?: number;
+}
+
+/** The 1.x chunk shape a custom provider may still yield; the factory stamps `type` on it. */
+export interface LegacyStreamChunk {
+  text: string;
   reasoning?: string;
   done?: boolean;
   usage?: TokenUsage;
   modelUsed?: string;
-  /** On the `done` chunk. */
   finishReason?: FinishReason;
-  /** On the `done` chunk, or on an intermediate chunk when the factory ran the calls and continued. */
   toolCalls?: ToolCall[];
-  /** On the `done` chunk, when the provider sends one. */
   requestId?: string;
-  /** On the `done` chunk: wall time for the whole stream (set by the factory). */
-  durationMs?: number;
-  /** On the `done` chunk: ms until the first non-empty text chunk (set by the factory). */
-  timeToFirstTokenMs?: number;
 }
 
 export interface TextPart {

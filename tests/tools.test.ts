@@ -287,12 +287,12 @@ describe('factory maxSteps loop', () => {
     expect(seen[2].messages![2]).toMatchObject({ role: 'tool', content: '{"error":"offline"}' });
   });
 
-  test('stream: intermediate calls on a plain chunk, one done chunk at the end', async () => {
+  test('stream: intermediate calls as tool-call chunks, one done chunk at the end', async () => {
     const seen: AIRequest[] = [];
     const factory = new AIFactory({ providers: [stepProvider(seen)], discover: 'none' });
     const chunks = await collect(factory.processStream({ prompt: 'x', tools: [weather], maxSteps: 3 }));
     expect(chunks.filter((c) => c.done)).toHaveLength(1);
-    expect(chunks[0]).toMatchObject({ text: '', toolCalls: [{ id: 'c1', name: 'get_weather' }] });
+    expect(chunks[0]).toMatchObject({ type: 'tool-call', text: '', toolCall: { id: 'c1', name: 'get_weather' } });
     expect(chunks.map((c) => c.text).join('')).toBe('It is 21C.');
     expect(chunks[chunks.length - 1].finishReason).toBe('stop');
     expect(seen[1].messages?.[2]).toMatchObject({ role: 'tool', toolCallId: 'c1' });
