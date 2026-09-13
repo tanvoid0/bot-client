@@ -2,7 +2,7 @@
 
 > Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. One request shape with real streaming, tool calling (`maxSteps` loop), structured output (Standard Schema or JSON Schema), images and typed provider errors (`AIError` with `code`, `retryable`, `hint`). Native `fetch`; runs on Node 18+, Bun, Deno, Workers and browsers.
 
-Install: `npm install llmwire`. Entries: `.` (factory with all providers), `./core` (factory without providers, 9.6 kB gz), `./openai`, `./anthropic`, `./gemini`, `./ollama`, `./lmstudio`, `./openai-compatible`, `./ollama-cli` (Node only).
+Install: `npm install llmwire`. Entries: `.` (factory with all providers), `./core` (factory without providers), `./openai`, `./anthropic`, `./gemini`, `./ollama`, `./lmstudio`, `./openai-compatible`, `./agent` (`Agent`, `handoff`), `./session`, `./mcp` (`McpClient`), `./embed`, `./cost`; Node only: `./ollama-cli`, `./mcp-stdio`.
 
 Minimal use:
 
@@ -27,6 +27,7 @@ for await (const c of aiFactory.processStream({ prompt: 'Hi' })) if (c.type === 
 - [src/core/errors.ts](https://github.com/tanvoid0/llmwire/blob/main/src/core/errors.ts): `AIError`, `AIErrorCode`, classification
 - [src/ai-factory.ts](https://github.com/tanvoid0/llmwire/blob/main/src/ai-factory.ts): routing, retries, fallback, tool loop, schema validation
 - [src/providers/](https://github.com/tanvoid0/llmwire/blob/main/src/providers): one file per provider; `openai-compatible.ts` holds the `PRESETS` table
+- [src/agent/](https://github.com/tanvoid0/llmwire/blob/main/src/agent): `agent.ts`, `session.ts`, `mcp.ts`, `mcp-stdio.ts`, `embed.ts`, `cost.ts`
 
 ## Optional
 

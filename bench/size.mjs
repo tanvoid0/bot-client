@@ -1,24 +1,16 @@
 // Published-size check: bundle + minify dist output with esbuild, then gzip.
-import { execFileSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { createRequire } from 'node:module';
+import { dirname, isAbsolute, join } from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { buildSync } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, '..', 'dist');
-// Run the esbuild JS wrapper directly via `node`: avoids `npx`/cmd-shim
-// resolution weirdness on Windows and the shell:true arg-escaping warning.
-const esbuildBin = createRequire(import.meta.url).resolve('esbuild/bin/esbuild');
 
 function bundle(entry) {
-  return execFileSync(
-    process.execPath,
-    [esbuildBin, entry, '--bundle', '--minify', '--format=esm', '--platform=node'],
-    { cwd: dist, maxBuffer: 32 * 1024 * 1024 }
-  );
+  return buildSync({ entryPoints: [isAbsolute(entry) ? entry : join(dist, entry)], bundle: true, minify: true, format: 'esm', platform: 'node', write: false, logLevel: 'silent' }).outputFiles[0].contents;
 }
 
 /** What a consumer who imports `./core` plus one provider subpath actually ships. */
@@ -46,4 +38,7 @@ report(
 );
 for (const p of ['openai-compatible', 'openai-provider', 'anthropic-provider', 'gemini-provider', 'ollama-provider', 'lmstudio-provider']) {
   report(`providers/${p}.js`, `providers/${p}.js`);
+}
+for (const a of ['agent', 'session', 'mcp', 'embed', 'cost']) {
+  report(`agent/${a}.js (./${a})`, `agent/${a}.js`);
 }

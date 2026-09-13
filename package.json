@@ -1,7 +1,7 @@
 {
   "name": "llmwire",
   "version": "2.0.0",
-  "description": "Zero-dependency TypeScript client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. Real streaming, tool calling, structured output (Standard Schema or JSON Schema), images, typed provider errors with hints, retries with backoff, static model routing. Node 18+, Bun, Deno, edge, browsers.",
+  "description": "Zero-dependency TypeScript client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. Real streaming, tool calling, structured output (Standard Schema or JSON Schema), images, typed provider errors with hints, retries with backoff, static model routing. Agents, MCP client, sessions, embeddings as separate entries. Node 18+, Bun, Deno, edge, browsers.",
   "sideEffects": false,
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -110,7 +110,73 @@
       "default": "./dist/ollama-cli.js"
     },
     "./package.json": "./package.json",
-    "./cli": "./dist/cli.js"
+    "./cli": "./dist/cli.js",
+    "./agent": {
+      "import": {
+        "types": "./dist/agent/agent.d.ts",
+        "default": "./dist/agent/agent.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/agent.d.ts",
+        "default": "./dist/cjs/agent/agent.js"
+      },
+      "default": "./dist/agent/agent.js"
+    },
+    "./session": {
+      "import": {
+        "types": "./dist/agent/session.d.ts",
+        "default": "./dist/agent/session.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/session.d.ts",
+        "default": "./dist/cjs/agent/session.js"
+      },
+      "default": "./dist/agent/session.js"
+    },
+    "./mcp": {
+      "import": {
+        "types": "./dist/agent/mcp.d.ts",
+        "default": "./dist/agent/mcp.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/mcp.d.ts",
+        "default": "./dist/cjs/agent/mcp.js"
+      },
+      "default": "./dist/agent/mcp.js"
+    },
+    "./mcp-stdio": {
+      "import": {
+        "types": "./dist/agent/mcp-stdio.d.ts",
+        "default": "./dist/agent/mcp-stdio.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/mcp-stdio.d.ts",
+        "default": "./dist/cjs/agent/mcp-stdio.js"
+      },
+      "default": "./dist/agent/mcp-stdio.js"
+    },
+    "./embed": {
+      "import": {
+        "types": "./dist/agent/embed.d.ts",
+        "default": "./dist/agent/embed.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/embed.d.ts",
+        "default": "./dist/cjs/agent/embed.js"
+      },
+      "default": "./dist/agent/embed.js"
+    },
+    "./cost": {
+      "import": {
+        "types": "./dist/agent/cost.d.ts",
+        "default": "./dist/agent/cost.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/cost.d.ts",
+        "default": "./dist/cjs/agent/cost.js"
+      },
+      "default": "./dist/agent/cost.js"
+    }
   },
   "scripts": {
     "build": "npm run build:esm && npm run build:cjs",
@@ -174,7 +240,13 @@
     "zod",
     "vision",
     "vercel-ai-sdk-alternative",
-    "langchain-alternative"
+    "langchain-alternative",
+    "mcp",
+    "model-context-protocol",
+    "agents",
+    "multi-agent",
+    "embeddings",
+    "rag"
   ],
   "author": "tanvoid0",
   "license": "MIT",
@@ -242,6 +314,24 @@
       ],
       "core": [
         "dist/core.d.ts"
+      ],
+      "agent": [
+        "dist/agent/agent.d.ts"
+      ],
+      "session": [
+        "dist/agent/session.d.ts"
+      ],
+      "mcp": [
+        "dist/agent/mcp.d.ts"
+      ],
+      "mcp-stdio": [
+        "dist/agent/mcp-stdio.d.ts"
+      ],
+      "embed": [
+        "dist/agent/embed.d.ts"
+      ],
+      "cost": [
+        "dist/agent/cost.d.ts"
       ]
     }
   }

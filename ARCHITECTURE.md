@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1–4 done; 2.0.0 released as `llmwire` with the `@tanvoid0/bot-client` shim (all 2026-09-13). Next: Phase 5 (agent layer, 2.1.0).
+Status: Phases 1–5 done; 2.0.0 released as `llmwire` with the `@tanvoid0/bot-client` shim, 2.1.0 (agent layer) unreleased on main (all 2026-09-13). Next: release 2.1.0, then Phase 6 (routines).
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
@@ -641,14 +641,14 @@ if a 2.0 is not ready.
 
 ### Phase 5 — agent layer (2.1.0, additive)
 
-- [ ] `./agent`: `Agent`, `asTool`, `handoff`, `onStep`
-- [ ] `./session`: `Session`, `Store`, `MemoryStore`, token-budget truncation, optional summarize
-- [ ] `./mcp`: Streamable HTTP client, `tools()`, `resources()`, `prompts()`; `MCP_ERROR` code
-- [ ] `./mcp-stdio`: stdio transport (node-only)
-- [ ] `./embed` for OpenAI-compatible, Gemini, Ollama; `cosine`
-- [ ] `./cost` with dated price table
-- [ ] `concurrency` on factory; `usage.cachedTokens`
-- [ ] Tests: MCP against a 40-line mock server (`node:http`), agent loop with fake provider, handoff chain, session truncation
+- [x] `./agent`: `Agent`, `asTool`, `handoff`, `onStep` (2026-09-13). `Agent.run` is `factory.process` with defaults merged; the loop stays in the factory, which gained `AIRequest.onStep`. A handoff tool has no `execute`, so the factory's loop stops on it and `Agent.run` continues the conversation as the target; `handedOffTo` names the immediate target, nested chains carry their own. Default factory is the shared `aiFactory`, loaded with a dynamic import so `./core` users who pass one never bundle the providers.
+- [x] `./session`: `Session`, `Store`, `MemoryStore`, budget, optional summarize (2026-09-13). §13.2's role-priority shrink became: shorten tool results to `toolResultChars`, then drop whole oldest turns (a user message through the next one) so a tool call never loses its result; `chars / 4` corrected by the last `usage.promptTokens`. Summary goes in as a `system` message, which Anthropic and Gemini already fold into their system field.
+- [x] `./mcp`: Streamable HTTP client, `tools()`, `resources()`, `prompts()`; `MCP_ERROR` (2026-09-13). Replies read as JSON or as the SSE frame carrying our id; `Mcp-Session-Id` echoed; `DELETE` on close. Not done: server-initiated notification stream (GET), `Last-Event-ID` reconnect, sampling, roots. Protocol version `2025-06-18`.
+- [x] `./mcp-stdio`: stdio transport (node-only) (2026-09-13)
+- [x] `./embed` for OpenAI-compatible, Gemini, Ollama; `cosine` (2026-09-13). One function over `httpJson`, not provider classes; provider picked from the model id via the catalog.
+- [x] `./cost` with dated price table (2026-09-13: Anthropic from the claude-api skill table, OpenAI and Google from their pricing pages; other vendors left out rather than guessed, callers pass their own table)
+- [x] `concurrency` on factory (2026-09-13; `usage.cachedTokens` was already surfaced by every provider in 2.0)
+- [x] Tests (2026-09-13: `tests/agent.test.ts`, MCP mock server alternates JSON and SSE replies)
 
 ### Phase 6 — routines (2.2.0, additive)
 
@@ -704,12 +704,12 @@ Tick when the README reflects reality. Do not tick early; the README is the prod
 - [ ] npm page preview checked (`npm view`, README render on npmjs.com)
 
 **After Phase 5**
-- [ ] Hero line: add "agents, MCP client, sessions, embeddings"
-- [ ] New sections: "Agents" (define, run, stream, `asTool` supervisor example, `handoff`), "MCP" (connect, list tools, feed into an agent; stdio note), "Sessions" (store, truncation), "Embeddings", "Cost"
-- [ ] Install section: list the new subpaths and state core size is unchanged (re-run `npm run size`)
-- [ ] Comparison table: fill Agent, MCP, Embeddings rows
-- [ ] Keywords: add `mcp`, `model-context-protocol`, `agents`, `multi-agent`, `embeddings`, `rag`
-- [ ] Types block: `Tool.execute` receives `{ signal }`; `AIResponse.steps`, `handedOffTo`
+- [x] Hero line: add "agents, MCP client, sessions, embeddings"
+- [x] New sections: "Agents" (define, run, stream, `asTool` supervisor example, `handoff`), "MCP" (connect, list tools, feed into an agent; stdio note), "Sessions" (store, truncation), "Embeddings", "Cost"
+- [x] Install section: list the new subpaths (`./core` + `./openai` is 12.4 kB gz after `onStep` and `concurrency`, `npm run bench:size`)
+- [x] Comparison table: fill Agent, MCP, Embeddings rows
+- [x] Keywords: add `mcp`, `model-context-protocol`, `agents`, `multi-agent`, `embeddings`, `rag`
+- [x] Types block: `Tool.execute` receives `{ signal }`; `AIResponse.steps`, `handedOffTo`
 
 **After Phase 6**
 - [ ] New section "Routines": interval and cron examples, `store`, `catchUp`, "not a distributed scheduler" note

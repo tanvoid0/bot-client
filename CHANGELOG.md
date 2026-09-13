@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2.1.0
+
+Additive. Six new entries, none imported by the core; `.` and `./core` sizes are unchanged.
+
+### Added
+
+- `llmwire/agent`: `Agent({ name, model?, system?, tools?, maxSteps?, factory?, onStep? })` with `run` and `stream` through the factory's tool loop; `agent.asTool()` for supervisor patterns; `handoff(agent)` ends the current turn and continues the same conversation as another agent (`handedOffTo` on the result, `steps` merged). Uses the shared `aiFactory` unless given one.
+- `llmwire/session`: `Session({ id, store?, maxTokens?, summarize?, toolResultChars? })` keeps a conversation across `send(agent, input)` calls in a `Store` (`MemoryStore` ships) and holds it under a budget: tool results shortened first, then whole oldest turns dropped (never the last, never a call without its result), optionally replaced by one model-written summary. `transcript(response)` turns an answer with steps into messages.
+- `llmwire/mcp`: `McpClient.connect({ url | transport })`, JSON-RPC 2.0 over Streamable HTTP with `fetch`, no SDK. `tools()` returns `Tool[]` whose `execute` calls `tools/call`; `resources()`, `readResource`, `prompts()`, `getPrompt`, `ping`, `call`. JSON-RPC errors are `AIError` `MCP_ERROR` with `providerCode` the RPC code. `llmwire/mcp-stdio`: `McpStdioTransport` (Node only).
+- `llmwire/embed`: `embed(texts, { model, provider?, baseURL?, apiKey? })` for OpenAI-format `/embeddings`, Gemini `batchEmbedContents` and Ollama `/api/embed`; `cosine`.
+- `llmwire/cost`: `estimateCost(usage, model, table?)` from a dated list-price table (`PRICES`, `PRICES_DATE`) for Anthropic, OpenAI and Google models; `undefined` for anything else.
+- `AIRequest.onStep(step)`: called after each round of the factory's tool loop, on `process` and `processStream`.
+- `AIFactoryConfig.concurrency`: max provider calls in flight across the factory; a stream holds its slot until it ends.
+
 ## [2.0.0] - 2026-09-13
 
 Breaking. See [MIGRATION.md](MIGRATION.md); every removed input fails with an `AIError` naming its replacement.

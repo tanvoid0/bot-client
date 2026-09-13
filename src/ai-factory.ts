@@ -34,6 +34,23 @@ export class AIFactory {
     this.discover = this.config.discover ?? 'lazy';
   }
 
+  // ---- concurrency: one permit per in-flight provider call (a stream holds its permit until it ends) ----
+  private active = 0;
+  private waiters: Array<() => void> = [];
+
+  private async acquire(): Promise<void> {
+    const max = this.config.concurrency;
+    if (!max) return;
+    if (this.active >= max) await new Promise<void>((resolve) => this.waiters.push(resolve));
+    this.active++;
+  }
+
+  private release(): void {
+    if (!this.config.concurrency) return;
+    this.active--;
+    this.waiters.shift()?.();
+  }
+
   /**
    * Provider discovery probes providers over the network. It runs on first
    * use, not on construction, so importing or wiring this into a DI container
@@ -231,12 +248,23 @@ export class AIFactory {
       const calls = res.success ? (res.toolCalls ?? []) : [];
       if (step >= maxSteps || !canRun(req.tools, calls)) return steps.length ? { ...res, steps } : res;
       const results = await runTools(req.tools!, calls, req.signal);
-      steps.push({ text: res.data ?? '', toolCalls: calls, toolResults: results, usage: res.usage });
+      const done: Step = { text: res.data ?? '', toolCalls: calls, toolResults: results, usage: res.usage };
+      steps.push(done);
+      await request.onStep?.(done);
       req = nextStepRequest(req, res.data ?? '', calls, results);
     }
   }
 
   private async processOnce(request: AIRequest): Promise<AIResponse> {
+    await this.acquire();
+    try {
+      return await this.processGated(request);
+    } finally {
+      this.release();
+    }
+  }
+
+  private async processGated(request: AIRequest): Promise<AIResponse> {
     await this.ensureInitialized();
     const started = now();
     const resolved = this.resolve(request);
@@ -376,11 +404,21 @@ export class AIFactory {
         return;
       }
       const results = await runTools(req.tools!, calls, req.signal);
+      await request.onStep?.({ text, toolCalls: calls, toolResults: results, usage: done?.usage });
       req = nextStepRequest(req, text, calls, results);
     }
   }
 
   private async *streamOnce(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
+    await this.acquire();
+    try {
+      yield* this.streamGated(request);
+    } finally {
+      this.release();
+    }
+  }
+
+  private async *streamGated(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
     await this.ensureInitialized();
     const started = now();
     const resolved = this.resolve(request);

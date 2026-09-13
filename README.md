@@ -4,18 +4,19 @@
 [![npm version](https://img.shields.io/npm/v/llmwire.svg)](https://www.npmjs.com/package/llmwire)
 [![npm downloads](https://img.shields.io/npm/dm/llmwire.svg)](https://www.npmjs.com/package/llmwire)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.1%20kB%20gz-blue)
+![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.4%20kB%20gz-blue)
 ![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
 [![API docs](https://img.shields.io/badge/API%20docs-typedoc-blue)](https://tanvoid0.github.io/llmwire/)
 
-Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them.
+Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them; plus agents, an MCP client, sessions and embeddings as separate entries.
 
 ## Why llmwire
 
-- **Zero runtime dependencies.** Native `fetch`, no Node built-ins in the main entry: Node 18+, Bun, Deno, Workers, browsers. `/core` plus one provider bundles to 12.1 kB gzipped.
+- **Zero runtime dependencies.** Native `fetch`, no Node built-ins in the main entry: Node 18+, Bun, Deno, Workers, browsers. `/core` plus one provider bundles to 12.4 kB gzipped.
 - **Local first, cloud with one env var.** Ollama and LM Studio work with no config; `OPENAI_API_KEY` (and friends) switches on cloud. Routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins.
 - **One request shape, every capability.** `messages` with images, `tools` with an automatic `maxSteps` loop, `schema` through any Standard Schema (Zod, Valibot, ArkType) or plain JSON Schema, typed stream chunks, `finishReason` and `usage` on every answer.
 - **Honest errors.** Every failure is an `AIError` with a `code`, the provider's own message never rewritten, and a `hint` saying what to do next. Retries with backoff only on what is retryable; fallback across providers; a stream idle timeout.
+- **Agent layer, no runtime.** `Agent` with `asTool` and `handoff`, `Session` with a token budget, `McpClient` over Streamable HTTP or stdio, `embed` and `estimateCost`: each its own subpath, none imported by the core.
 - **Batteries for local models.** Ollama pull/list/rm/show/ps/run from the library or `npx llmwire`, plus a `doctor` that pings every provider.
 
 Upgrading from 1.x? Read [MIGRATION.md](MIGRATION.md): every removed input fails with an error naming its replacement.
@@ -28,12 +29,13 @@ Upgrading from 1.x? Read [MIGRATION.md](MIGRATION.md): every removed input fails
 npm install llmwire
 ```
 
-The main entry exports everything and is edge/browser safe. `/core` plus one provider subpath bundles to 12.1 kB gzipped (`npm run bench:size`); `ollama-cli` is the only one that needs Node:
+The main entry exports everything and is edge/browser safe. `/core` plus one provider subpath bundles to 12.4 kB gzipped (`npm run bench:size`); `ollama-cli` and `mcp-stdio` are the only ones that need Node:
 
 ```typescript
 import { AIFactory } from 'llmwire/core';               // factory, errors, types; no built-in providers (pass `providers`)
 import { OpenAIProvider } from 'llmwire/openai';        // also /anthropic /gemini /ollama /lmstudio /openai-compatible
 import { runOllamaCLI } from 'llmwire/ollama-cli';      // spawns the `ollama` binary (Node only)
+import { Agent, handoff } from 'llmwire/agent';         // also /session /mcp /embed /cost; /mcp-stdio is Node only
 ```
 
 ## Quick start
@@ -154,6 +156,95 @@ if (res.success) console.log(res.object); // { city: 'Oslo', tempC: 21 }, valida
 ```
 
 A non-JSON answer fails `INVALID_JSON`, a validation failure `SCHEMA_MISMATCH` (every issue in `errorInfo.details`), and an answer cut off by `maxTokens` `TRUNCATED`; the raw text stays on `data`. A plain JSON Schema is sent but not validated locally (no validator ships). Streams ignore `schema`.
+
+---
+
+## Agents
+
+An `Agent` is a name, a model, a system prompt, tools and a step budget, run through the factory's tool loop. It is a config holder with `run` and `stream`, not a runtime: no planner, no graph, no hidden memory.
+
+```typescript
+import { Agent, handoff } from 'llmwire/agent';
+
+const researcher = new Agent({
+  name: 'researcher',
+  model: 'claude-sonnet-4-5',
+  system: 'You research. Cite sources.',
+  tools: [search, fetchPage],
+  maxSteps: 8,                          // default 8
+  onStep: (step) => console.log(step.toolCalls.map((c) => c.name)),
+});
+
+const out = await researcher.run('Compare X and Y');           // AIResponse, plus steps[]
+for await (const chunk of researcher.stream('Summarize Z')) { /* typed chunks, as processStream */ }
+```
+
+Multi-agent is two tools:
+
+- **Agent as tool.** `researcher.asTool()` is a `Tool` taking `{ input }` and returning the agent's text. A supervisor lists sub-agents in `tools` and the model decides who to call.
+- **Handoff.** `handoff(billing)` is a tool that ends the current agent's turn and continues the same conversation as `billing`, with its system prompt and tools. `run` returns `billing`'s answer with `handedOffTo: 'billing'` and the merged `steps`.
+
+```typescript
+const billing = new Agent({ name: 'billing', system: 'You handle refunds.', tools: [refund] });
+const triage = new Agent({ name: 'triage', tools: [handoff(billing), researcher.asTool()] });
+const res = await triage.run('I want my money back');
+res.handedOffTo; // 'billing'
+```
+
+Parallel fan-out is `Promise.all(agents.map((a) => a.run(task)))`. Agents use the shared `aiFactory` unless given `{ factory }`; `onStep` is also available on any `AIRequest`.
+
+## Sessions
+
+A `Session` keeps a conversation across `send` calls in a `Store` (`MemoryStore` ships; Redis or SQLite is the same three methods) and holds it under a token budget.
+
+```typescript
+import { Session, MemoryStore } from 'llmwire/session';
+
+const session = new Session({ id: 'user-42', store: new MemoryStore(), maxTokens: 32_000, summarize: true });
+await session.send(agent, 'Hello');       // appends the user turn, every tool round, the answer
+await session.send(agent, 'And then?');   // the model sees the whole history
+```
+
+Over budget, tool results are shortened first (`toolResultChars`, default 400), then whole oldest turns are dropped, never the last one and never a tool call without its result; with `summarize: true` the dropped turns become one model-written system message. No tokenizer ships: the estimate is `chars / 4`, corrected by the provider's last reported `usage.promptTokens`.
+
+## MCP
+
+`McpClient` speaks JSON-RPC over Streamable HTTP with `fetch` (any runtime) or stdio (`llmwire/mcp-stdio`, Node only); no SDK is imported. A server's tools come back as `Tool[]` ready for an agent or any request.
+
+```typescript
+import { McpClient } from 'llmwire/mcp';
+import { McpStdioTransport } from 'llmwire/mcp-stdio';
+
+const remote = await McpClient.connect({ url: 'https://mcp.example.com/mcp', headers: { authorization: `Bearer ${token}` } });
+const local = await McpClient.connect({ transport: new McpStdioTransport({ command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '.'] }) });
+
+const agent = new Agent({ name: 'ops', tools: [...(await remote.tools()), ...(await local.tools())] });
+await remote.resources(); await remote.readResource('file:///a.txt'); await remote.prompts(); await remote.ping();
+```
+
+Tool schemas are the server's own JSON Schema, passed through. Results are flattened to text (images and resources noted); a result marked `isError` throws so the model sees `{ error }`. A JSON-RPC error is an `AIError` with code `MCP_ERROR`, `providerCode` the RPC code and the server's message verbatim. Not implemented: sampling, roots, the server-initiated notification stream.
+
+## Embeddings
+
+```typescript
+import { embed, cosine } from 'llmwire/embed';
+
+const { embeddings } = await embed(['a cat', 'a dog', 'a car'], { model: 'text-embedding-3-small' });
+cosine(embeddings[0], embeddings[1]); // 0.8…
+```
+
+OpenAI-format `/embeddings` (OpenAI and any compatible host via `baseURL`), Gemini `batchEmbedContents`, Ollama `/api/embed`; the provider is picked from the model id unless given. Keys come from `OPENAI_API_KEY` / `GEMINI_API_KEY` or `{ apiKey }`.
+
+## Cost
+
+```typescript
+import { estimateCost, PRICES, PRICES_DATE } from 'llmwire/cost';
+
+const res = await aiFactory.process({ prompt, modelId: 'gpt-4o' });
+estimateCost(res.usage, res.modelUsed!); // USD, or undefined for a model not in the table
+```
+
+List prices for Anthropic, OpenAI and Google models, USD per million tokens, cached prompt tokens at the cache price; `PRICES_DATE` says when the table was last checked. Pass your own table as the third argument for other hosts or negotiated rates. Never a guess: unknown model, `undefined`.
 
 ---
 
@@ -279,7 +370,7 @@ Streaming rule: retry and fallback only run before the first chunk arrives. Once
 | Memory for a 1 MB streamed answer | flat (about 0.3 MB heap delta; chunks are yielded, never accumulated) |
 | Cold import of the core entry | 9.8 ms median, zero network calls |
 | First-request network calls with `discover: 'lazy'` and a routable `modelId` | 1 (the completion itself) |
-| Published size (minified, gz) | `.` entry 14.0 kB; one provider subpath 6.1–6.7 kB |
+| Published size (minified, gz) | `.` entry 18.0 kB; `./core` + one provider 12.4 kB; one provider subpath 7.2–7.9 kB; `./mcp` 4.3 kB, `./session` 1.2 kB, `./cost` 0.7 kB |
 
 Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
 
@@ -298,9 +389,9 @@ Snapshot taken 2026-09-13 from each project's public docs; corrections welcome a
 | Typed error taxonomy | yes (`APICallError`, retryable) | partial | partial | partial | **yes** (`code`, `retryable`, `hint`, provider message untouched) |
 | Retry with backoff | yes | no | no | no | **yes**, retryable codes only, `Retry-After` honoured |
 | Edge / browser / Workers | yes | yes | yes | yes | **yes** (`/ollama-cli` is the only Node-only entry) |
-| Agent class / multi-agent | `Agent`, agents as tools | no | no | no | no (tool loop only; planned 2.1) |
-| MCP client | via `@modelcontextprotocol/sdk` | no | no | no | no (planned 2.1) |
-| Embeddings | yes | no | yes | yes | no (planned 2.1) |
+| Agent class / multi-agent | `Agent`, agents as tools | no | no | no | **yes**: `Agent`, `asTool`, `handoff`, `Session` |
+| MCP client | via `@modelcontextprotocol/sdk` | no | no | no | **yes**, no SDK: Streamable HTTP and stdio |
+| Embeddings | yes | no | yes | yes | **yes** (OpenAI-format, Gemini, Ollama) + `cosine` |
 | Local-first (Ollama, LM Studio) zero config | no | no | partial | yes | **yes** |
 | Ollama management (pull/list/rm/ps) | no | no | no | no | **yes** |
 | npx CLI | no | no | no | no | **yes** (`doctor`, models, keys) |
@@ -566,16 +657,21 @@ Hooks are awaited; `onResponse` gets the `AIResponse`, or the `done` chunk for a
 <details>
 <summary><strong>Types</strong></summary>
 
-- **AIRequest**: `prompt?` (one of `prompt` / `messages` required), `messages?` (`Message[]`), `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `jsonMode?`, `schema?` (JSON Schema or Standard Schema), `tools?`, `toolChoice?`, `maxSteps?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models)), `providerOptions?` (merged last into the wire body)
+- **AIRequest**: `prompt?` (one of `prompt` / `messages` required), `messages?` (`Message[]`), `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `jsonMode?`, `schema?` (JSON Schema or Standard Schema), `tools?`, `toolChoice?`, `maxSteps?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models)), `providerOptions?` (merged last into the wire body), `onStep?(step)` (after each tool round)
 - **Message**: `{ role: 'system', content }` | `{ role: 'user', content: string | (TextPart | ImagePart)[] }` | `{ role: 'assistant', content, toolCalls? }` | `{ role: 'tool', toolCallId, name, content }`
 - **Tool**: `name`, `description?`, `parameters` (JSON Schema), `execute?(args, { signal })`; **ToolCall**: `id`, `name`, `arguments`; **ToolResult**: `toolCallId`, `name`, `result?`, `error?`; **Step**: `text`, `toolCalls`, `toolResults`, `usage?`
 - **AIResponse**: `success`, `data?`, `reasoning?`, `object?` (when `schema` given), `toolCalls?`, `steps?`, `error?`, `errorInfo?` (`AIError`, set when `success` is false), `finishReason` (`'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown'`), `usage?` (`TokenUsage`), `modelUsed?`, `providerId?`, `requestId?`, `durationMs`, `retryCount`, `fallbackUsed`
 - **AIStreamChunk**: `{ type: 'text', text }` | `{ type: 'reasoning', text }` | `{ type: 'tool-call', toolCall }` | `{ type: 'done', finishReason, usage?, toolCalls?, requestId?, durationMs?, timeToFirstTokenMs? }`; every member has `modelUsed?`
 - **TokenUsage**: `promptTokens?`, `completionTokens?`, `totalTokens?`, `cachedTokens?`
-- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'lazy' | 'eager' | 'none'`, default `'lazy'`), `timeout?`, `streamIdleTimeout?`, `hooks?` (`{ onRequest?, onResponse?, onError? }`)
+- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'lazy' | 'eager' | 'none'`, default `'lazy'`), `timeout?`, `streamIdleTimeout?`, `hooks?` (`{ onRequest?, onResponse?, onError? }`), `concurrency?` (max provider calls in flight; a stream holds its slot until it ends)
 - **BaseProviderConfig**: accepted by every built-in provider constructor: `baseURL?`, `headers?`, `timeout?`, `streamIdleTimeout?`, `models?` (seeds the supported list, skips discovery), `modelCacheTtlMs?` (default 300000), `fetch?` (custom `fetch`, for proxies or tests)
 - **OpenAICompatibleProvider config**: `BaseProviderConfig` plus `preset?` (`'groq' | 'openrouter' | 'deepseek' | 'mistral' | 'xai' | 'together' | 'agent-platform'`), `id?`, `name?`, `apiKey?`, `modelFilter?`, `defaultModel?`, `defaultMaxTokens?`, `requireApiKey?`, `streamUsage?`, `apiKeyEnv?`
 - **OllamaProvider config**: `BaseProviderConfig` plus `cli?` (`runOllamaCLI` from `/ollama-cli`), `ollamaExecutablePath?`, `preferCLI?`
+- **Agent** (`/agent`): `new Agent({ name, model?, system?, tools?, maxSteps?, temperature?, maxTokens?, factory?, onStep? })`; `run(input, overrides?)` → `AgentResult` (`AIResponse` + `handedOffTo?`), `stream(input, overrides?)`, `asTool({ name?, description? })`, `request(input)`; `handoff(agent, description?)` → `Tool`
+- **Session** (`/session`): `new Session({ id, store?, maxTokens?, summarize?, toolResultChars? })`; `send(agent, input, overrides?)`, `messages()`, `clear()`, `estimateTokens()`; `Store` is `{ get(id), set(id, messages), delete?(id) }`; `MemoryStore`; `transcript(response)` → `Message[]`
+- **McpClient** (`/mcp`): `McpClient.connect({ url, headers?, fetch?, signal? } | { transport })`; `tools()` → `Tool[]`, `listTools()`, `callTool(name, args)`, `resources()`, `readResource(uri)`, `prompts()`, `getPrompt(name, args?)`, `ping()`, `call(method, params)`, `close()`; `McpStdioTransport({ command, args?, env?, cwd?, timeout? })` from `/mcp-stdio`
+- **embed** (`/embed`): `embed(texts, { model, provider?, baseURL?, apiKey?, headers?, fetch?, signal?, timeout?, dimensions? })` → `{ embeddings: number[][], usage? }`; `cosine(a, b)`
+- **cost** (`/cost`): `estimateCost(usage, model, table?)` → USD | `undefined`; `priceOf(model, table?)`; `PRICES`, `PRICES_DATE`
 - **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
 - **AIError**: see [Errors](#errors)
 - **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`; `processStream` is optional (the factory falls back to one chunk from `process`)

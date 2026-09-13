@@ -167,6 +167,8 @@ export interface AIRequest {
   toolChoice?: 'auto' | 'none' | 'required' | { name: string };
   /** Rounds of model call + tool execution the factory runs before returning (default 1: calls are returned, not executed). */
   maxSteps?: number;
+  /** Called after each round of the tool loop, with what the model said, what it called and what came back. Awaited. */
+  onStep?: (step: Step) => void | Promise<void>;
   /** Whole-request timeout in ms for non-streaming calls (default 30000; 0 disables). */
   timeout?: number;
   /** Streaming: ms of upstream silence before the stream fails with `STREAM_IDLE` (default 60000; 0 disables). */
@@ -268,6 +270,8 @@ export interface AIFactoryConfig {
   streamIdleTimeout?: number;
   /** Observe every attempt: called before each provider call, after each answer, and on each failure. Awaited; a throw propagates to the caller. */
   hooks?: Hooks;
+  /** Max provider calls in flight at once across this factory; extra requests queue. A stream holds its slot until it ends. Default: unlimited. */
+  concurrency?: number;
 }
 
 /** Lifecycle hooks on the factory. `provider` is the provider id; `model` is the id the request asked for, if any. */
