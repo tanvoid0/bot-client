@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.1%20kB%20gz-blue)
 ![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
+[![API docs](https://img.shields.io/badge/API%20docs-typedoc-blue)](https://tanvoid0.github.io/bot-client/)
 
 Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them.
 
@@ -782,7 +783,7 @@ if (provider) {
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the gates to run and a template for adding a provider. [examples/](examples) has runnable scripts; [llms.txt](llms.txt) is the index for coding agents.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the gates to run and a template for adding a provider. [examples/](examples) has runnable scripts; the generated [API reference](https://tanvoid0.github.io/bot-client/) lists every exported symbol; [llms.txt](llms.txt) is the index for coding agents.
 
 ---
 

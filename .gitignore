@@ -101,3 +101,6 @@ jspm_packages/
 
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
+
+# Generated API docs (deployed by .github/workflows/docs.yml)
+docs/

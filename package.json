@@ -118,7 +118,7 @@
     "test:integration": "node scripts/test-integration.js",
     "test:package": "node test-package.js",
     "lint": "eslint src/**/*.ts",
-    "docs": "typedoc src/index.ts --out docs",
+    "docs": "typedoc",
     "clean": "node -e \"const fs=require('fs'); ['dist','docs'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true});}catch(e){}})\"",
     "prepublishOnly": "npm run clean && npm run build && npm run test:unit",
     "publish:patch": "node scripts/publish.js patch",
@@ -200,7 +200,7 @@
   "bugs": {
     "url": "https://github.com/tanvoid0/bot-client/issues"
   },
-  "homepage": "https://github.com/tanvoid0/bot-client#readme",
+  "homepage": "https://tanvoid0.github.io/bot-client/",
   "files": [
     "dist",
     "README.md",

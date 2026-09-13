@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 docs done except the typedoc site (needs GitHub Pages enabled on the repo) and the unscoped-name decision (owner's call); then release 2.0.0.
+Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 done except the unscoped-name decision (owner's call); then release 2.0.0.
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
@@ -635,9 +635,9 @@ if a 2.0 is not ready.
 
 - [x] README rewrite per §10.3 and §12 (2026-09-13: one-sentence hero, five "Why" bullets, dated comparison table, Development → CONTRIBUTING)
 - [x] package.json metadata per §10.1; `llms.txt` (2026-09-13; `MIGRATION.md` and `llms.txt` added to `files`). GitHub topics: set in the repo settings by hand, not tracked here
-- [ ] Docs site from typedoc on GitHub Pages; `homepage` updated
+- [x] Docs site from typedoc on GitHub Pages (`.github/workflows/docs.yml`, `typedoc.json`); `homepage` updated (2026-09-13)
 - [x] `CONTRIBUTING.md` with provider template (2026-09-13)
-- [ ] Decide on unscoped name
+- [ ] Decide on unscoped name (2026-09-13 check: `botclient` and `any-llm` taken; `llm-client` and `anyllm` free on npm)
 
 ### Phase 5 — agent layer (2.1.0, additive)
 
@@ -697,7 +697,7 @@ Tick when the README reflects reality. Do not tick early; the README is the prod
 **After Phase 4**
 - [x] First sentence contains: zero-dependency, TypeScript, LLM client, the provider names, streaming, tool calling
 - [x] "Why bot-client" five bullets
-- [ ] Docs site link in badges and footer
+- [x] Docs site link in badges and footer
 - [x] `llms.txt` present and linked
 - [x] package.json `description` and `keywords` match README wording
 - [x] Remove Development section's internal notes; point to CONTRIBUTING
