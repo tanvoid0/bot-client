@@ -1,10 +1,30 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, totalTokens } from './base-provider.js';
+import { BaseProvider, buildChatMessages, firstEnv, mergeBody, totalTokens } from './base-provider.js';
 import { parseSSE } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
 
+/**
+ * Hosts with a known origin and key variable. `new OpenAICompatibleProvider({ preset: 'groq' })`
+ * reads `GROQ_API_KEY`; any field given alongside overrides the preset.
+ */
+export const PRESETS = {
+  groq: { name: 'Groq', baseURL: 'https://api.groq.com/openai/v1', apiKeyEnv: ['GROQ_API_KEY'] },
+  openrouter: { name: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', apiKeyEnv: ['OPENROUTER_API_KEY'] },
+  deepseek: { name: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', apiKeyEnv: ['DEEPSEEK_API_KEY'] },
+  // Mistral rejects unknown fields (422) and reports usage on the last chunk anyway.
+  mistral: { name: 'Mistral', baseURL: 'https://api.mistral.ai/v1', apiKeyEnv: ['MISTRAL_API_KEY'], streamUsage: false },
+  xai: { name: 'xAI', baseURL: 'https://api.x.ai/v1', apiKeyEnv: ['XAI_API_KEY'] },
+  together: { name: 'Together', baseURL: 'https://api.together.xyz/v1', apiKeyEnv: ['TOGETHER_API_KEY'] },
+  /** The agent-platform `/v1` proxy: local, bearer-authenticated, emits `AIErrorCode` names in `error.code`. */
+  'agent-platform': { name: 'agent-platform', baseURL: 'http://127.0.0.1:18410/v1', apiKeyEnv: ['AGENT_PLATFORM_KEY'] },
+} as const satisfies Record<string, Omit<OpenAICompatibleConfig, 'preset'>>;
+
+export type PresetId = keyof typeof PRESETS;
+
 export interface OpenAICompatibleConfig extends BaseProviderConfig {
+  /** A shipped host (`groq`, `openrouter`, ...): fills `id`, `name`, `baseURL`, `apiKeyEnv` and `requireApiKey`. */
+  preset?: PresetId;
   /** Provider id used in routing and errors (`openai`, `groq`, ...). */
   id?: string;
   /** Display name. */
@@ -53,11 +73,13 @@ export class OpenAICompatibleProvider extends BaseProvider {
   private readonly authHeaders: Record<string, string>;
 
   constructor(config: OpenAICompatibleConfig = {}) {
-    super(config);
-    this.cfg = config;
-    const base = (config.baseURL ?? 'https://api.openai.com').replace(/\/+$/, '');
+    const preset = config.preset && PRESETS[config.preset];
+    const cfg: OpenAICompatibleConfig = preset ? { id: config.preset, requireApiKey: true, ...preset, ...config } : config;
+    super(cfg);
+    this.cfg = cfg;
+    const base = (cfg.baseURL ?? 'https://api.openai.com').replace(/\/+$/, '');
     this.v1 = base.endsWith('/v1') ? base : `${base}/v1`;
-    this.apiKey = config.apiKey ?? firstEnv(config.apiKeyEnv);
+    this.apiKey = cfg.apiKey ?? firstEnv(cfg.apiKeyEnv ?? []);
     this.authHeaders = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
   }
 
@@ -75,6 +97,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   async testConnection(): Promise<boolean> {
     if (this.cfg.requireApiKey && !this.apiKey) return false;
+    if (this.cached()) return true;
     try {
       await this.http(`${this.v1}/models`, { headers: this.authHeaders });
       return true;
@@ -85,9 +108,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   async discoverModels(): Promise<string[]> {
     if (this.cfg.requireApiKey && !this.apiKey) return [];
+    const hit = this.cached();
+    if (hit) return hit;
     try {
       const response = await this.http(`${this.v1}/models`, { headers: this.authHeaders });
-      const ids: string[] = (response?.data ?? [])
+      // Together answers with a bare array instead of `{ data: [...] }`.
+      const ids: string[] = (Array.isArray(response) ? response : response?.data ?? [])
         .map((m: { id?: string }) => m.id)
         .filter((id: unknown): id is string => typeof id === 'string');
       return this.setDiscovered(this.cfg.modelFilter ? ids.filter(this.cfg.modelFilter) : ids);
@@ -116,15 +142,18 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   protected body(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
     const maxTokens = request.maxTokens ?? this.cfg.defaultMaxTokens;
-    return {
-      model,
-      messages: buildChatMessages(request),
-      ...(maxTokens !== undefined && { max_tokens: maxTokens }),
-      temperature: request.temperature ?? 0.7,
-      ...(request.jsonMode && { response_format: { type: 'json_object' } }),
-      ...(stream && { stream: true }),
-      ...(stream && this.cfg.streamUsage !== false && { stream_options: { include_usage: true } }),
-    };
+    return mergeBody(
+      {
+        model,
+        messages: buildChatMessages(request),
+        ...(maxTokens !== undefined && { max_tokens: maxTokens }),
+        temperature: request.temperature ?? 0.7,
+        ...(request.jsonMode && { response_format: { type: 'json_object' } }),
+        ...(stream && { stream: true }),
+        ...(stream && this.cfg.streamUsage !== false && { stream_options: { include_usage: true } }),
+      },
+      request.providerOptions
+    );
   }
 
   private missing(request: AIRequest): AIResponse | null {
@@ -232,10 +261,4 @@ export class OpenAICompatibleProvider extends BaseProvider {
 function reasoningField(message: any): string {
   const v = message?.reasoning_content ?? message?.reasoning;
   return typeof v === 'string' ? v : '';
-}
-
-function firstEnv(names?: string[]): string | undefined {
-  if (!names || typeof process === 'undefined' || !process.env) return undefined;
-  for (const n of names) if (process.env[n]) return process.env[n];
-  return undefined;
 }

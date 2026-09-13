@@ -1,7 +1,7 @@
 {
   "name": "@tanvoid0/bot-client",
-  "version": "1.7.0",
-  "description": "Zero-dependency TypeScript client for OpenAI, Anthropic, Gemini, Ollama, LM Studio and any OpenAI-compatible API. Real streaming, JSON mode, typed provider errors with hints, retries with backoff, static model routing. Node 18+.",
+  "version": "1.8.0",
+  "description": "Zero-dependency TypeScript client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. Real streaming, JSON mode, typed provider errors with hints, retries with backoff, static model routing, lifecycle hooks. Node 18+, Bun, Deno, edge.",
   "sideEffects": false,
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -11,10 +11,92 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/cjs/index.js",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      },
       "default": "./dist/index.js"
+    },
+    "./openai": {
+      "import": {
+        "types": "./dist/providers/openai-provider.d.ts",
+        "default": "./dist/providers/openai-provider.js"
+      },
+      "require": {
+        "types": "./dist/cjs/providers/openai-provider.d.ts",
+        "default": "./dist/cjs/providers/openai-provider.js"
+      },
+      "default": "./dist/providers/openai-provider.js"
+    },
+    "./anthropic": {
+      "import": {
+        "types": "./dist/providers/anthropic-provider.d.ts",
+        "default": "./dist/providers/anthropic-provider.js"
+      },
+      "require": {
+        "types": "./dist/cjs/providers/anthropic-provider.d.ts",
+        "default": "./dist/cjs/providers/anthropic-provider.js"
+      },
+      "default": "./dist/providers/anthropic-provider.js"
+    },
+    "./gemini": {
+      "import": {
+        "types": "./dist/providers/gemini-provider.d.ts",
+        "default": "./dist/providers/gemini-provider.js"
+      },
+      "require": {
+        "types": "./dist/cjs/providers/gemini-provider.d.ts",
+        "default": "./dist/cjs/providers/gemini-provider.js"
+      },
+      "default": "./dist/providers/gemini-provider.js"
+    },
+    "./ollama": {
+      "import": {
+        "types": "./dist/providers/ollama-provider.d.ts",
+        "default": "./dist/providers/ollama-provider.js"
+      },
+      "require": {
+        "types": "./dist/cjs/providers/ollama-provider.d.ts",
+        "default": "./dist/cjs/providers/ollama-provider.js"
+      },
+      "default": "./dist/providers/ollama-provider.js"
+    },
+    "./lmstudio": {
+      "import": {
+        "types": "./dist/providers/lmstudio-provider.d.ts",
+        "default": "./dist/providers/lmstudio-provider.js"
+      },
+      "require": {
+        "types": "./dist/cjs/providers/lmstudio-provider.d.ts",
+        "default": "./dist/cjs/providers/lmstudio-provider.js"
+      },
+      "default": "./dist/providers/lmstudio-provider.js"
+    },
+    "./openai-compatible": {
+      "import": {
+        "types": "./dist/providers/openai-compatible.d.ts",
+        "default": "./dist/providers/openai-compatible.js"
+      },
+      "require": {
+        "types": "./dist/cjs/providers/openai-compatible.d.ts",
+        "default": "./dist/cjs/providers/openai-compatible.js"
+      },
+      "default": "./dist/providers/openai-compatible.js"
+    },
+    "./ollama-cli": {
+      "import": {
+        "types": "./dist/ollama-cli.d.ts",
+        "default": "./dist/ollama-cli.js"
+      },
+      "require": {
+        "types": "./dist/cjs/ollama-cli.d.ts",
+        "default": "./dist/cjs/ollama-cli.js"
+      },
+      "default": "./dist/ollama-cli.js"
     },
     "./package.json": "./package.json"
   },
@@ -61,7 +143,17 @@
     "zero-dependency",
     "typescript",
     "chatgpt",
-    "machine-learning"
+    "machine-learning",
+    "groq",
+    "openrouter",
+    "deepseek",
+    "mistral",
+    "xai",
+    "together",
+    "edge",
+    "cloudflare-workers",
+    "bun",
+    "deno"
   ],
   "author": "tanvoid0",
   "license": "MIT",
@@ -101,5 +193,30 @@
   "module": "dist/index.js",
   "overrides": {
     "minimatch@9": "^9.0.7"
+  },
+  "typesVersions": {
+    "*": {
+      "openai": [
+        "dist/providers/openai-provider.d.ts"
+      ],
+      "anthropic": [
+        "dist/providers/anthropic-provider.d.ts"
+      ],
+      "gemini": [
+        "dist/providers/gemini-provider.d.ts"
+      ],
+      "ollama": [
+        "dist/providers/ollama-provider.d.ts"
+      ],
+      "lmstudio": [
+        "dist/providers/lmstudio-provider.d.ts"
+      ],
+      "openai-compatible": [
+        "dist/providers/openai-compatible.d.ts"
+      ],
+      "ollama-cli": [
+        "dist/ollama-cli.d.ts"
+      ]
+    }
   }
 }

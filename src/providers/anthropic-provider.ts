@@ -1,6 +1,6 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, totalTokens } from './base-provider.js';
+import { BaseProvider, buildChatMessages, firstEnv, mergeBody, totalTokens } from './base-provider.js';
 import { parseSSE } from '../core/http.js';
 
 const DEFAULT_BASE = 'https://api.anthropic.com';
@@ -38,7 +38,7 @@ export class AnthropicProvider extends BaseProvider {
 
   constructor(config: AnthropicProviderConfig = {}) {
     super(config);
-    this.apiKey = config.apiKey ?? process.env.ANTHROPIC_API_KEY ?? process.env.BOT_CLIENT_ANTHROPIC_KEY;
+    this.apiKey = config.apiKey ?? firstEnv(['ANTHROPIC_API_KEY', 'BOT_CLIENT_ANTHROPIC_KEY']);
     this.base = (config.baseURL ?? DEFAULT_BASE).replace(/\/+$/, '');
   }
 
@@ -60,6 +60,7 @@ export class AnthropicProvider extends BaseProvider {
 
   async testConnection(): Promise<boolean> {
     if (!this.apiKey) return false;
+    if (this.cached()) return true;
     try {
       await this.http(`${this.base}/v1/models`, { headers: this.headers, params: { limit: '1' } });
       return true;
@@ -70,6 +71,8 @@ export class AnthropicProvider extends BaseProvider {
 
   async discoverModels(): Promise<string[]> {
     if (!this.apiKey) return [];
+    const hit = this.cached();
+    if (hit) return hit;
     try {
       const response = await this.http(`${this.base}/v1/models`, { headers: this.headers, params: { limit: '100' } });
       const ids: string[] = (response?.data ?? [])
@@ -131,14 +134,17 @@ export class AnthropicProvider extends BaseProvider {
     const thinking = request.reasoning
       ? { thinking: { type: 'enabled', budget_tokens: Math.max(1024, Math.floor(maxTokens / 2)) }, temperature: 1 }
       : { temperature: request.temperature ?? 0.7 };
-    return {
-      model,
-      messages: all.filter((m) => m.role !== 'system'),
-      ...(system && { system }),
-      max_tokens: request.reasoning ? Math.max(maxTokens, 2048) : maxTokens,
-      ...thinking,
-      ...(stream && { stream: true }),
-    };
+    return mergeBody(
+      {
+        model,
+        messages: all.filter((m) => m.role !== 'system'),
+        ...(system && { system }),
+        max_tokens: request.reasoning ? Math.max(maxTokens, 2048) : maxTokens,
+        ...thinking,
+        ...(stream && { stream: true }),
+      },
+      request.providerOptions
+    );
   }
 
   private resolveModel(request: AIRequest): string {

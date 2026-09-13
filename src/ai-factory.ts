@@ -1,4 +1,4 @@
-import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode } from './types/index.js';
+import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, Hooks } from './types/index.js';
 import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
 import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
 import { guessProvider, splitExplicit } from './core/catalog.js';
@@ -49,6 +49,11 @@ export class AIFactory {
 
   private log(level: keyof NonNullable<AIFactoryConfig['logger']>, message: string, ...args: unknown[]): void {
     this.config.logger?.[level]?.(message, ...args);
+  }
+
+  private hook<K extends keyof Hooks>(name: K, ctx: Parameters<NonNullable<Hooks[K]>>[0]): void | Promise<void> {
+    const fn = this.config.hooks?.[name] as ((ctx: unknown) => void | Promise<void>) | undefined;
+    return fn?.(ctx);
   }
 
   private candidates(): AIProvider[] {
@@ -220,13 +225,19 @@ export class AIFactory {
       await this.probe(provider);
       const request = this.forProvider(provider, resolved);
       for (let attempt = 0; ; attempt++) {
+        await this.hook('onRequest', { provider: provider.providerId, model: request.modelId, request });
         const result = await this.attempt(provider, request);
-        if (result.success) return this.finish(result, started, retryCount, fallbackUsed);
+        if (result.success) {
+          const done = this.finish(result, started, retryCount, fallbackUsed);
+          await this.hook('onResponse', { provider: provider.providerId, model: request.modelId, response: done, durationMs: done.durationMs! });
+          return done;
+        }
         last = result;
-        const retryable = result.errorInfo ? result.errorInfo.retryable : true;
-        const budget = result.errorInfo && SINGLE_RETRY.has(result.errorInfo.code) ? Math.min(1, this.retry.retries) : this.retry.retries;
-        if (!retryable || attempt >= budget) break;
-        if (result.errorInfo?.code === 'ABORTED') break;
+        const err = result.errorInfo!;
+        const budget = SINGLE_RETRY.has(err.code) ? Math.min(1, this.retry.retries) : this.retry.retries;
+        const willRetry = err.retryable && attempt < budget && err.code !== 'ABORTED';
+        await this.hook('onError', { provider: provider.providerId, model: request.modelId, error: err, willRetry });
+        if (!willRetry) break;
         retryCount++;
         const delay = retryDelay(attempt + 1, this.retry, result.errorInfo?.retryAfterMs);
         this.log('warn', `${provider.providerName} failed (${result.errorInfo?.code ?? 'UNKNOWN'}); retry ${attempt + 1}/${this.retry.retries} in ${delay}ms`);
@@ -317,19 +328,22 @@ export class AIFactory {
           ? provider.processStream(request)
           : this.oneChunk(provider, request);
         let first: IteratorResult<AIStreamChunk, void>;
+        await this.hook('onRequest', { provider: provider.providerId, model: request.modelId, request });
         try {
           first = await gen.next();
         } catch (error) {
           lastError = toAIError(error, { provider: provider.providerId, providerName: provider.providerName, model: request.modelId });
-          if (lastError.code === 'ABORTED') throw lastError;
           const budget = SINGLE_RETRY.has(lastError.code) ? Math.min(1, this.retry.retries) : this.retry.retries;
-          if (!lastError.retryable || attempt >= budget) break;
+          const willRetry = lastError.retryable && attempt < budget && lastError.code !== 'ABORTED';
+          await this.hook('onError', { provider: provider.providerId, model: request.modelId, error: lastError, willRetry });
+          if (lastError.code === 'ABORTED') throw lastError;
+          if (!willRetry) break;
           const delay = retryDelay(attempt + 1, this.retry, lastError.retryAfterMs);
           this.log('warn', `${provider.providerName} stream failed (${lastError.code}); retry ${attempt + 1}/${this.retry.retries} in ${delay}ms`);
           await sleep(delay, request.signal);
           continue;
         }
-        yield* this.drain(first, gen, provider, started);
+        yield* this.drain(first, gen, provider, request.modelId, started);
         return;
       }
     }
@@ -355,6 +369,7 @@ export class AIFactory {
     first: IteratorResult<AIStreamChunk, void>,
     gen: AsyncGenerator<AIStreamChunk, void, void>,
     provider: AIProvider,
+    model: string | undefined,
     started: number
   ): AsyncGenerator<AIStreamChunk, void, void> {
     let ttft: number | undefined;
@@ -364,14 +379,19 @@ export class AIFactory {
         const chunk = r.value;
         if (ttft === undefined && chunk.text) ttft = Math.round(now() - started);
         if (chunk.done) {
-          yield { ...chunk, durationMs: Math.round(now() - started), timeToFirstTokenMs: ttft };
+          const durationMs = Math.round(now() - started);
+          const done = { ...chunk, durationMs, timeToFirstTokenMs: ttft };
+          await this.hook('onResponse', { provider: provider.providerId, model, response: done, durationMs });
+          yield done;
         } else {
           yield chunk;
         }
         r = await gen.next();
       }
     } catch (error) {
-      throw toAIError(error, { provider: provider.providerId, providerName: provider.providerName });
+      const err = toAIError(error, { provider: provider.providerId, providerName: provider.providerName, model });
+      await this.hook('onError', { provider: provider.providerId, model, error: err, willRetry: false });
+      throw err;
     } finally {
       await gen.return?.(undefined).catch(() => undefined);
     }

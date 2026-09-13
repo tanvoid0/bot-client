@@ -81,6 +81,12 @@ export interface AIRequest {
    * `<think>` tags) is surfaced regardless of this flag.
    */
   reasoning?: boolean;
+  /**
+   * Provider-specific fields merged last into the wire body, one level deep
+   * (`{ options: { num_ctx: 8192 } }` for Ollama, `{ top_p: 0.9 }` for an
+   * OpenAI-format host). Whatever you put here wins over what the client sets.
+   */
+  providerOptions?: Record<string, unknown>;
   /** @deprecated Unused; removed in 2.0. */
   usageContext?: {
     taskType: 'content-generation' | 'analysis' | 'conversation' | 'code-generation' | 'custom';
@@ -194,6 +200,17 @@ export interface AIFactoryConfig {
   timeout?: number;
   /** Default idle timeout (ms) for streams; per-request `streamIdleTimeout` wins. */
   streamIdleTimeout?: number;
+  /** Observe every attempt: called before each provider call, after each answer, and on each failure. Awaited; a throw propagates to the caller. */
+  hooks?: Hooks;
+}
+
+/** Lifecycle hooks on the factory. `provider` is the provider id; `model` is the id the request asked for, if any. */
+export interface Hooks {
+  onRequest?(ctx: { provider: string; model?: string; request: AIRequest }): void | Promise<void>;
+  /** `response` is the `AIResponse`, or the `done` chunk for a stream. */
+  onResponse?(ctx: { provider: string; model?: string; response: AIResponse | AIStreamChunk; durationMs: number }): void | Promise<void>;
+  /** `willRetry` is true when the factory is about to retry the same provider; false before a fallback or the final failure. */
+  onError?(ctx: { provider: string; model?: string; error: AIError; willRetry: boolean }): void | Promise<void>;
 }
 
 /** Options every built-in provider accepts. */
@@ -208,6 +225,8 @@ export interface BaseProviderConfig {
   streamIdleTimeout?: number;
   /** Seed the supported-model list so no discovery call is needed. */
   models?: string[];
+  /** How long (ms) a successful model listing is reused before `discoverModels()` fetches again. Default 300000; 0 disables. */
+  modelCacheTtlMs?: number;
   /** Custom `fetch` (proxy agent, tracing, tests). */
   fetch?: FetchLike;
 }

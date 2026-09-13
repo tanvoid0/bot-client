@@ -2,8 +2,8 @@
 export { AIFactory, aiFactory, ensureFactoryReady } from './ai-factory.js';
 
 // Providers (for custom factory or direct use)
-export { OpenAICompatibleProvider } from './providers/openai-compatible.js';
-export type { OpenAICompatibleConfig } from './providers/openai-compatible.js';
+export { OpenAICompatibleProvider, PRESETS } from './providers/openai-compatible.js';
+export type { OpenAICompatibleConfig, PresetId } from './providers/openai-compatible.js';
 export { OpenAIProvider } from './providers/openai-provider.js';
 export type { OpenAIProviderConfig } from './providers/openai-provider.js';
 export { AnthropicProvider } from './providers/anthropic-provider.js';
@@ -14,11 +14,8 @@ export { LMStudioProvider } from './providers/lmstudio-provider.js';
 export type { LMStudioProviderConfig } from './providers/lmstudio-provider.js';
 export { OllamaProvider } from './providers/ollama-provider.js';
 export type { OllamaProviderConfig } from './providers/ollama-provider.js';
-export { BaseProvider, buildChatMessages } from './providers/base-provider.js';
-export {
-  runOllamaCLI,
-  isOllamaCLIAvailable
-} from './ollama-cli.js';
+export { BaseProvider, buildChatMessages, mergeBody } from './providers/base-provider.js';
+// `runOllamaCLI` / `isOllamaCLIAvailable` moved to '@tanvoid0/bot-client/ollama-cli' (1.8.0): they spawn a process, and this entry must run where `fetch` does.
 export type { OllamaCLIResult, OllamaCLIOptions } from './ollama-cli.js';
 
 // Wire-format helpers (for custom providers)
@@ -39,6 +36,7 @@ export type {
   BaseProviderConfig,
   DiscoveryMode,
   FinishReason,
+  Hooks,
   TokenUsage,
   Logger,
   ConversationHistory,

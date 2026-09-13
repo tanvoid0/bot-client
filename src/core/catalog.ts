@@ -7,6 +7,11 @@ const PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^(gpt-|o[1-4](-|$)|chatgpt-|text-embedding-(3|ada)|davinci|babbage|dall-e|whisper|tts-)/i, 'openai'],
   [/^claude/i, 'anthropic'],
   [/^(gemini-|gemma-\d|imagen-|veo-|text-embedding-00\d|embedding-\d|learnlm)/i, 'gemini'],
+  // Hosted ids that differ from the Ollama spelling of the same family.
+  [/^grok-/i, 'xai'],
+  [/^deepseek-(chat|reasoner)$/i, 'deepseek'],
+  [/^(open-(mistral|mixtral)-|(mistral|codestral|ministral|magistral|pixtral|devstral)-(.*-)?(latest|\d{4})$)/i, 'mistral'],
+  [/^llama-3\.\d-\d+b-(versatile|instant)$/i, 'groq'],
 ];
 
 /** Bare family names as Ollama publishes them (`llama3.1`, `qwen2.5-coder`, ...). */

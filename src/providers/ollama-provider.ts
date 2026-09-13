@@ -1,14 +1,9 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, totalTokens } from './base-provider.js';
+import { BaseProvider, buildChatMessages, mergeBody, totalTokens } from './base-provider.js';
 import { parseNDJSON } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
-import {
-  runOllamaCLI,
-  isOllamaCLIAvailable,
-  type OllamaCLIResult,
-  type OllamaCLIOptions
-} from '../ollama-cli.js';
+import type { runOllamaCLI, OllamaCLIResult, OllamaCLIOptions } from '../ollama-cli.js';
 
 /** Optional configuration for OllamaProvider */
 export interface OllamaProviderConfig extends BaseProviderConfig {
@@ -18,12 +13,20 @@ export interface OllamaProviderConfig extends BaseProviderConfig {
   baseURL?: string;
   /** Prefer CLI over API when both are available (default: false = try API first) */
   preferCLI?: boolean;
+  /**
+   * The `ollama` binary, for management calls when the server is down and for
+   * `serve`, `stop`, `create`. Pass `runOllamaCLI` from
+   * `@tanvoid0/bot-client/ollama-cli`; it lives there so the main entry pulls
+   * in no `child_process`. Without it those calls return `ok: false`.
+   */
+  cli?: typeof runOllamaCLI;
 }
 
 export class OllamaProvider extends BaseProvider {
   private readonly ollamaExecutablePath: string;
   private readonly base: string;
   private readonly preferCLI: boolean;
+  private readonly cli?: typeof runOllamaCLI;
 
   protected get baseURL(): string {
     return this.base;
@@ -34,6 +37,7 @@ export class OllamaProvider extends BaseProvider {
     this.ollamaExecutablePath = config.ollamaExecutablePath ?? 'ollama';
     this.base = config.baseURL ?? 'http://localhost:11434';
     this.preferCLI = config.preferCLI ?? false;
+    this.cli = config.cli;
   }
 
   private async tryApi<T>(fn: () => Promise<T>): Promise<T | null> {
@@ -59,16 +63,21 @@ export class OllamaProvider extends BaseProvider {
     args: string[] = [],
     options: OllamaCLIOptions = {}
   ): Promise<OllamaCLIResult> {
-    const mergedOptions: OllamaCLIOptions = {
-      ...options,
-      executablePath: options.executablePath ?? this.ollamaExecutablePath
-    };
-    return runOllamaCLI(subcommand, args, mergedOptions);
+    if (!this.cli) {
+      return { ok: false, code: -1, stdout: '', stderr: 'Ollama CLI not configured: pass `cli: runOllamaCLI` from @tanvoid0/bot-client/ollama-cli' };
+    }
+    return this.cli(subcommand, args, { ...options, executablePath: options.executablePath ?? this.ollamaExecutablePath });
   }
 
-  /** Check if the Ollama CLI is available on the system. */
+  /** Check if the Ollama CLI is available on the system (needs `cli` in the config). */
   async isCLIAvailable(): Promise<boolean> {
-    return isOllamaCLIAvailable(this.ollamaExecutablePath);
+    if (!this.cli) return false;
+    try {
+      await this.cli('ls', [], { timeout: 5_000, executablePath: this.ollamaExecutablePath });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Pull a model (API: POST /api/pull, fallback: `ollama pull <model>`). */
@@ -165,6 +174,8 @@ export class OllamaProvider extends BaseProvider {
   }
 
   async discoverModels(): Promise<string[]> {
+    const hit = this.cached();
+    if (hit) return hit;
     try {
       const response = await this.http(`${this.base}/api/tags`);
 
@@ -194,6 +205,7 @@ export class OllamaProvider extends BaseProvider {
   }
 
   async testConnection(): Promise<boolean> {
+    if (this.cached()) return true;
     try {
       await this.http(`${this.base}/api/tags`);
       return true;
@@ -227,17 +239,20 @@ export class OllamaProvider extends BaseProvider {
   }
 
   private chatBody(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
-    return {
-      model,
-      messages: buildChatMessages(request),
-      stream,
-      think: request.reasoning ?? false,
-      ...(request.jsonMode && { format: 'json' }),
-      options: {
-        temperature: request.temperature ?? 0.7,
-        ...(request.maxTokens !== undefined && { num_predict: request.maxTokens }),
+    return mergeBody(
+      {
+        model,
+        messages: buildChatMessages(request),
+        stream,
+        think: request.reasoning ?? false,
+        ...(request.jsonMode && { format: 'json' }),
+        options: {
+          temperature: request.temperature ?? 0.7,
+          ...(request.maxTokens !== undefined && { num_predict: request.maxTokens }),
+        },
       },
-    };
+      request.providerOptions
+    );
   }
 
   /** A mid-stream `{"error": ...}` line, classified like an HTTP error body. */

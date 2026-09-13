@@ -26,4 +26,6 @@ function report(label, entry) {
 }
 
 report('index.js (.)', 'index.js');
-report('providers/openai-compatible.js', 'providers/openai-compatible.js');
+for (const p of ['openai-compatible', 'openai-provider', 'anthropic-provider', 'gemini-provider', 'ollama-provider', 'lmstudio-provider']) {
+  report(`providers/${p}.js`, `providers/${p}.js`);
+}

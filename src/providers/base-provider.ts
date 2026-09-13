@@ -41,6 +41,30 @@ export function buildChatMessages(request: AIRequest): ChatMessage[] {
   return messages;
 }
 
+/** First set environment variable among `names`, or undefined (also when there is no `process`). */
+export function firstEnv(names: string[]): string | undefined {
+  if (typeof process === 'undefined' || !process.env) return undefined;
+  for (const n of names) if (process.env[n]) return process.env[n];
+  return undefined;
+}
+
+const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * `providerOptions` merged last into a wire body. One level deep: a nested
+ * object (`options` on Ollama, `generationConfig` on Gemini) is extended, not
+ * replaced, so `{ options: { num_ctx: 8192 } }` keeps the temperature.
+ */
+export function mergeBody(body: Record<string, unknown>, extra?: Record<string, unknown>): Record<string, unknown> {
+  if (!extra) return body;
+  const out = { ...body };
+  for (const [k, v] of Object.entries(extra)) {
+    const cur = out[k];
+    out[k] = isPlain(v) && isPlain(cur) ? { ...cur, ...v } : v;
+  }
+  return out;
+}
+
 /** Sum of prompt and completion tokens when both are known. */
 export function totalTokens(promptTokens?: number, completionTokens?: number): number | undefined {
   return promptTokens !== undefined && completionTokens !== undefined ? promptTokens + completionTokens : undefined;
@@ -57,6 +81,7 @@ export interface OkExtra {
 export abstract class BaseProvider implements AIProvider {
   protected _supportedModels: string[] = [];
   protected readonly baseConfig: BaseProviderConfig;
+  private discoveredAt?: number;
 
   constructor(config: BaseProviderConfig = {}) {
     this.baseConfig = config;
@@ -103,7 +128,14 @@ export abstract class BaseProvider implements AIProvider {
   protected setDiscovered(ids: string[]): string[] {
     const seed = this.baseConfig.models ?? [];
     this._supportedModels = Array.from(new Set([...seed, ...ids]));
+    this.discoveredAt = Date.now();
     return this._supportedModels;
+  }
+
+  /** The last successful discovery, while younger than `modelCacheTtlMs` (default 5 min; 0 disables). */
+  protected cached(): string[] | null {
+    const ttl = this.baseConfig.modelCacheTtlMs ?? 300_000;
+    return this.discoveredAt !== undefined && Date.now() - this.discoveredAt < ttl ? this._supportedModels : null;
   }
 
   isModelSupported(modelId: string): boolean {

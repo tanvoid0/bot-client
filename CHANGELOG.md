@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-13
+
+### Added
+
+- **Presets** on `OpenAICompatibleProvider`: `{ preset: 'groq' | 'openrouter' | 'deepseek' | 'mistral' | 'xai' | 'together' | 'agent-platform' }` fills in the origin, display name and key variable (`GROQ_API_KEY`, ...); any field given alongside overrides it. `PRESETS` is exported. Model ids those hosts use (`grok-4`, `deepseek-chat`, `mistral-large-latest`, `llama-3.3-70b-versatile`) route to the matching provider with no discovery call. Together's bare-array `/models` reply is read.
+- `AIRequest.providerOptions`: provider-specific fields merged last into the wire body, one level deep (`{ options: { num_ctx: 8192 } }` extends Ollama's `options` instead of replacing it). `mergeBody` exported for custom providers.
+- Factory `hooks`: `onRequest`, `onResponse` (the `AIResponse`, or the `done` chunk for a stream, with `durationMs`) and `onError` (with `willRetry`). Awaited; called once per attempt.
+- Subpath exports: `@tanvoid0/bot-client/openai`, `/anthropic`, `/gemini`, `/ollama`, `/lmstudio`, `/openai-compatible`, `/ollama-cli`, with `typesVersions` for `moduleResolution: node`. The CJS build now ships its own `.d.ts`, so a CommonJS TypeScript project under `moduleResolution: nodenext` (NestJS) no longer hits TS1479 on any entry. The main entry and every provider subpath bundle for the browser with no Node built-ins; a test enforces it.
+- `npx @tanvoid0/bot-client doctor [preset...]`: lists each provider's models, sends it a one-line prompt and prints the model that answered or the classified error with its hint.
+- `modelCacheTtlMs` on every provider (default 5 min; 0 disables): a successful model listing is reused by `discoverModels()` and `testConnection()`, so eager discovery costs one call per provider instead of two. A failed listing is never cached.
+- `OllamaProviderConfig.cli`: pass `runOllamaCLI` to keep the `ollama` binary as a fallback for management calls.
+
+### Changed
+
+- `runOllamaCLI` and `isOllamaCLIAvailable` moved from the main entry to `@tanvoid0/bot-client/ollama-cli` (they spawn a process; the main entry now runs wherever `fetch` does). `OllamaProvider` calls the binary only when given `cli: runOllamaCLI`; without it, `serve`, `stop`, `create` and the server-down fallback return `{ ok: false }` with a message saying so. The `npx` CLI is unaffected.
+- Anthropic and Gemini read their key through the same guarded helper as the OpenAI dialect, so constructing them where `process` is undefined no longer throws.
+- `test-package.js` awaits `aiFactory.ready()` and drops calls to methods removed in 1.7.
+
 ## [1.7.0] - 2026-09-13
 
 ### Added

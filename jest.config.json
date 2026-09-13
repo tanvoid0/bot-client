@@ -24,6 +24,7 @@
     "**/tests/factory.test.ts",
     "**/tests/http.test.ts",
     "**/tests/providers-stream.test.ts",
-    "**/tests/reasoning.test.ts"
+    "**/tests/reasoning.test.ts",
+    "**/tests/phase2.test.ts"
   ]
 }

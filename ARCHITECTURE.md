@@ -4,8 +4,21 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: **plan**. Nothing below is implemented yet unless the checkbox is ticked.
-Last updated 2026-09-13 against v1.6.0.
+Status: Phases 1 and 2 shipped (1.7.0, 1.8.0, both 2026-09-13). Phase 3 is next.
+Last updated 2026-09-13 against v1.8.0.
+
+## 0. Next session starts here
+
+Decisions during Phase 2 that change the plan:
+- Presets are a `preset:` field plus a `PRESETS` table on `OpenAICompatibleProvider`, not six files. `agent-platform` (`http://127.0.0.1:18410/v1`, `AGENT_PLATFORM_KEY`) is in the table.
+- `runOllamaCLI` / `isOllamaCLIAvailable` moved to `./ollama-cli`; `OllamaProvider` takes `cli: runOllamaCLI` by injection. The one 1.8 change that is not additive; called out in CHANGELOG.
+- Factory-level `fetch` / `headers` not added (per-provider covers it). Hooks carry the `AIRequest`, not the wire body.
+- `.` bundle is 14.0 kB gz (target 12): re-exporting all providers keeps it there; subpaths are 6.1–6.7 kB each. Shrinking `.` further means dropping provider re-exports from it, a 2.0 item.
+- Catalog routes `grok-`, `deepseek-chat|reasoner`, Mistral's `-latest`/`-YYMM` ids and Groq's `-versatile|-instant` ids; `vendor/model` ids stay unrouted (OpenRouter, Together, Groq all use them).
+
+Phase 3 → 2.0.0 (breaking): §11 Phase 3 and §4. `messages[]` with images, tool calling with `maxSteps` and leaked `<function=>` recovery (§13.2), `schema` via Standard Schema, typed chunks with `legacyChunks`, `usage` replaces flat fields, `discover: 'lazy'` default, delete `@deprecated` types, drop provider re-exports from `.` if the size gate still matters, `MIGRATION.md`, Bun in CI.
+
+Known gaps: Gemini `reasoning: false` sends nothing (2.5 Pro cannot disable thinking); OpenAI-format servers have no request-side reasoning toggle; CI publish needs a new `NPM_TOKEN` with 2FA bypass; `doctor` is not unit-tested (it is a network ping by design).
 
 ---
 
@@ -599,12 +612,12 @@ if a 2.0 is not ready.
 
 ### Phase 2 — customisation (non-breaking, target 1.8.0)
 
-- [ ] `OpenAICompatibleProvider` + presets: groq, openrouter, deepseek, mistral, xai, together; OpenAI and LM Studio re-based on it (D12)
-- [ ] `baseURL`, `headers`, `fetch`, `timeout`, `models` on every provider; factory `fetch`, `headers`, `timeout`
-- [ ] `providerOptions` passthrough
-- [ ] `hooks`
-- [ ] Subpath exports, `sideEffects: false`, `ollama-cli` moved under `./ollama-cli`; core entry free of node built-ins (D9)
-- [ ] `bot-client doctor` CLI: prints each provider's reachability, key presence, first model, and the classified error when it fails
+- [x] `OpenAICompatibleProvider` + presets: groq, openrouter, deepseek, mistral, xai, together, agent-platform (`preset:` config field and a `PRESETS` table, not one file each); OpenAI and LM Studio re-based on it (D12)
+- [x] `baseURL`, `headers`, `fetch`, `timeout`, `models`, `modelCacheTtlMs` on every provider; factory `timeout`. Factory-level `fetch` / `headers` skipped: providers are constructed before the factory sees them, and per-provider `fetch` / `headers` cover it.
+- [x] `providerOptions` passthrough (`mergeBody`, one level deep)
+- [x] `hooks` (`onRequest` / `onResponse` / `onError` with `willRetry`); the factory-level ctx carries the `AIRequest`, not the wire body — wrap `fetch` for bytes
+- [x] Subpath exports, `sideEffects: false`, `ollama-cli` moved under `./ollama-cli`; core entry free of node built-ins, enforced by `tests/phase2.test.ts` bundling every entry with esbuild `--platform=browser` (D9). `OllamaProvider` takes `cli: runOllamaCLI` by injection.
+- [x] `bot-client doctor` CLI: lists models, then sends a 16-token prompt per provider (a `/models` 200 does not prove chat works; the ping surfaces `NO_MODEL`, `NO_API_KEY`, `PROVIDER_UNREACHABLE` through the existing classifier)
 
 ### Phase 3 — capability parity (2.0.0, breaking)
 
@@ -664,12 +677,12 @@ Tick when the README reflects reality. Do not tick early; the README is the prod
 - [x] CHANGELOG entry listing D1–D10, D13, D14 by symptom
 
 **After Phase 2**
-- [ ] Hero line: provider count and "any OpenAI-compatible API"
-- [ ] Providers table: add Groq, OpenRouter, DeepSeek, Mistral, xAI, Together rows; add `baseURL` column
-- [ ] Install section: subpath imports (`import { OpenAIProvider } from '@tanvoid0/bot-client/openai'`) and note core is edge/browser safe
-- [ ] New "Customisation" collapsed section: `baseURL`, `headers`, `fetch`, `timeout`, `models`, `providerOptions`, `hooks`, `discover`
-- [ ] CLI section: `doctor` command with sample output
-- [ ] Ollama CLI helper: import path changed to `/ollama-cli`
+- [x] Hero line: provider count and "any OpenAI-compatible API"
+- [x] Providers table: add Groq, OpenRouter, DeepSeek, Mistral, xAI, Together rows; add `baseURL` column
+- [x] Install section: subpath imports (`import { OpenAIProvider } from '@tanvoid0/bot-client/openai'`) and note core is edge/browser safe
+- [x] New "Customisation" collapsed section: `baseURL`, `headers`, `fetch`, `timeout`, `models`, `providerOptions`, `hooks`, `discover`
+- [x] CLI section: `doctor` command with sample output
+- [x] Ollama CLI helper: import path changed to `/ollama-cli`
 
 **After Phase 3 (2.0)**
 - [ ] Quick start uses `messages` where it helps; `prompt` shorthand still first

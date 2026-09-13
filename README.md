@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, and any OpenAI-compatible API via `OpenAICompatibleProvider`. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+). One request shape for every provider, with **real streaming** on all five, **typed provider errors** (a code and a hint, the provider's own message never rewritten), **retries with backoff**, a **stream idle timeout**, and `finishReason` on every response. Model routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
+Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, plus Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any other OpenAI-compatible API through one `OpenAICompatibleProvider`. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+); the main entry has no Node built-ins, so it runs in Bun, Deno, Workers and browsers too. One request shape for every provider, with **real streaming** on all five, **typed provider errors** (a code and a hint, the provider's own message never rewritten), **retries with backoff**, a **stream idle timeout**, and `finishReason` on every response. Model routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models, API keys and a `doctor` that pings every provider.
 
 ---
 
@@ -13,6 +13,13 @@ Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, and 
 
 ```bash
 npm install @tanvoid0/bot-client
+```
+
+The main entry exports everything and is edge/browser safe. Subpaths pull in one provider at a time; `ollama-cli` is the only one that needs Node:
+
+```typescript
+import { OpenAIProvider } from '@tanvoid0/bot-client/openai';        // also /anthropic /gemini /ollama /lmstudio /openai-compatible
+import { runOllamaCLI } from '@tanvoid0/bot-client/ollama-cli';      // spawns the `ollama` binary (Node only)
 ```
 
 ## Quick start
@@ -201,7 +208,7 @@ Streaming rule: retry and fallback only run before the first chunk arrives. Once
 | Memory for a 1 MB streamed answer | flat (about 0.3 MB heap delta; chunks are yielded, never accumulated) |
 | Cold import of the core entry | 9.8 ms median, zero network calls |
 | First-request network calls with `discover: 'lazy'` and a routable `modelId` | 1 (the completion itself) |
-| Published size (`.` entry, minified, gz) | 13.5 kB (`OpenAICompatibleProvider` alone: 6.1 kB) |
+| Published size (minified, gz) | `.` entry 14.0 kB; one provider subpath 6.1–6.7 kB |
 
 Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
 
@@ -209,15 +216,31 @@ Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock se
 
 ## npx CLI
 
-Manage Ollama models and API keys from the terminal:
+Manage Ollama models and API keys from the terminal, and check every provider at once:
 
 ```bash
 npx @tanvoid0/bot-client help
+npx @tanvoid0/bot-client doctor
 npx @tanvoid0/bot-client ollama list
 npx @tanvoid0/bot-client ollama pull llama3.1:8b
 npx @tanvoid0/bot-client keys list
 npx @tanvoid0/bot-client keys set BOT_CLIENT_OPENAI_KEY sk-...
 ```
+
+<details>
+<summary><strong>doctor</strong></summary>
+
+Lists each provider's models, sends it a one-line prompt (`maxTokens: 16`), and prints the model that answered or the classified error with its hint. Name a preset to include it (`doctor groq openrouter`). Exit code 0 when at least one provider answered.
+
+```
+$ npx @tanvoid0/bot-client doctor
+openai       FAIL  NO_API_KEY                   OpenAI API key required — Pass { apiKey } to the OpenAI provider or set its environment variable. (24 ms)
+anthropic    FAIL  NO_API_KEY                   Anthropic API key required — Pass { apiKey } to the Anthropic provider or set its environment variable. (24 ms)
+gemini       FAIL  NO_API_KEY                   Gemini API key required — Pass { apiKey } to the Google Gemini provider or set its environment variable. (24 ms)
+ollama       ok    llama3.1:8b                  6 models (353 ms)
+lmstudio     FAIL  NO_MODEL                     No chat models available (only embedding models may be loaded) — Load a chat model in LM Studio, or pass modelId. (6 ms)
+```
+</details>
 
 <details>
 <summary><strong>Ollama commands</strong></summary>
@@ -345,32 +368,40 @@ const factory = new AIFactory({ discover: 'lazy' });
 <details>
 <summary><strong>Any OpenAI-compatible API</strong></summary>
 
-Point `OpenAICompatibleProvider` at any server that speaks the OpenAI chat-completions dialect: Groq, OpenRouter, DeepSeek, Mistral, xAI, Together, vLLM, and more.
+Point `OpenAICompatibleProvider` at any server that speaks the OpenAI chat-completions dialect. Six hosts ship as presets that fill in the origin and the key variable:
 
 ```typescript
 import { AIFactory, OpenAICompatibleProvider } from '@tanvoid0/bot-client';
 
-const groq = new OpenAICompatibleProvider({
-  id: 'groq',
-  baseURL: 'https://api.groq.com/openai/v1',
-  apiKey: process.env.GROQ_API_KEY,
-});
+const groq = new OpenAICompatibleProvider({ preset: 'groq' });               // reads GROQ_API_KEY
+const vllm = new OpenAICompatibleProvider({ id: 'vllm', baseURL: 'http://gpu-box:8000' });
 
-const factory = new AIFactory({ providers: [groq] });
+const factory = new AIFactory({ providers: [groq, vllm] });
 ```
 
-Thin presets (`GroqProvider`, `OpenRouterProvider`, ...) ship in 1.8; today `OpenAICompatibleProvider` covers all of them with one line of config.
+| Preset | Origin | Key variable |
+|---|---|---|
+| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| `deepseek` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` |
+| `mistral` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
+| `xai` | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| `together` | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` |
+
+Any field given alongside `preset` overrides it (`{ preset: 'groq', apiKey, baseURL }`). Model ids the hosts use (`grok-4`, `deepseek-chat`, `mistral-large-latest`, `llama-3.3-70b-versatile`) route to the matching preset with no discovery call; `vendor/model` ids (OpenRouter, Together) go to `defaultProvider`, or prefix them explicitly: `openrouter/meta-llama/llama-4-scout`.
 </details>
 
 <details>
 <summary><strong>Ollama provider (programmatic)</strong></summary>
 
-Use the Ollama provider for API-first operations (fallback to `ollama` CLI when server is down):
+Use the Ollama provider for API-first operations. Pass `cli: runOllamaCLI` to fall back to the `ollama` binary when the server is down (and for `serve`, `stop`, `create`, which are CLI-only); it comes from the Node-only `ollama-cli` subpath so the main entry stays free of `child_process`:
 
 ```typescript
-import { aiFactory, OllamaProvider } from '@tanvoid0/bot-client';
+import { AIFactory, OllamaProvider } from '@tanvoid0/bot-client';
+import { runOllamaCLI } from '@tanvoid0/bot-client/ollama-cli';
 
-const ollama = aiFactory.getProvider('ollama') as OllamaProvider | null;
+const factory = new AIFactory({ providers: [new OllamaProvider({ cli: runOllamaCLI })] });
+const ollama = factory.getProvider('ollama') as OllamaProvider | null;
 if (ollama) {
   const list = await ollama.list();   // list models
   await ollama.pull('llama3.1:8b');   // pull model
@@ -384,6 +415,7 @@ Or instantiate with custom base URL / CLI path:
 ```typescript
 const provider = new OllamaProvider({
   baseURL: 'http://localhost:11434',
+  cli: runOllamaCLI,
   ollamaExecutablePath: 'ollama',
   preferCLI: false  // true = always use CLI
 });
@@ -395,7 +427,7 @@ await provider.pull('gemma3');
 <summary><strong>Standalone Ollama CLI helper</strong></summary>
 
 ```typescript
-import { runOllamaCLI, isOllamaCLIAvailable } from '@tanvoid0/bot-client';
+import { runOllamaCLI, isOllamaCLIAvailable } from '@tanvoid0/bot-client/ollama-cli';
 
 const ok = await isOllamaCLIAvailable();
 const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => process.stderr.write(c) });
@@ -404,15 +436,51 @@ const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => pr
 </details>
 
 <details>
+<summary><strong>Customisation</strong></summary>
+
+Every built-in provider takes `BaseProviderConfig`; the factory adds hooks and defaults on top.
+
+```typescript
+import { AIFactory, AnthropicProvider, OllamaProvider } from '@tanvoid0/bot-client';
+
+const anthropic = new AnthropicProvider({
+  baseURL: 'https://my-gateway.example.com',      // any origin that speaks the Messages API
+  headers: { 'x-team': 'search' },                // sent on every request, after the provider's own
+  fetch: myTracedFetch,                           // proxies, undici Agent, tests
+  timeout: 15_000,                                // JSON calls; streams use streamIdleTimeout
+  models: ['claude-sonnet-4-5'],                  // seeds the list: no discovery call, stays first after one
+  modelCacheTtlMs: 60_000,                        // reuse a model listing this long (default 5 min; 0 = always fetch)
+});
+
+const factory = new AIFactory({
+  providers: [anthropic, new OllamaProvider()],
+  discover: 'lazy',                                // probe a provider the first time a request lands on it
+  hooks: {
+    onRequest: ({ provider, model, request }) => log.debug('→', provider, model),
+    onResponse: ({ provider, response, durationMs }) => metrics.timing(provider, durationMs),
+    onError: ({ provider, error, willRetry }) => log.warn(provider, error.code, willRetry ? 'retrying' : 'giving up'),
+  },
+});
+
+// Provider-specific fields go in providerOptions; they are merged last into the wire body, one level deep.
+await factory.process({ prompt: 'hi', modelId: 'llama3.1', providerOptions: { keep_alive: '10m', options: { num_ctx: 8192 } } });
+await factory.process({ prompt: 'hi', modelId: 'gpt-4o', providerOptions: { top_p: 0.9, seed: 7 } });
+```
+
+Hooks are awaited; `onResponse` gets the `AIResponse`, or the `done` chunk for a stream. To see the exact bytes on the wire, wrap `fetch`.
+</details>
+
+<details>
 <summary><strong>Types</strong></summary>
 
-- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `jsonMode?`, `responseSchema?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models))
+- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `jsonMode?`, `responseSchema?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models)), `providerOptions?` (merged last into the wire body)
 - **AIResponse**: `success`, `data?`, `error?`, `errorInfo?` (`AIError`, set when `success` is false), `finishReason` (`'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown'`), `usage?` (`TokenUsage`), `modelUsed?`, `providerId?`, `requestId?`, `durationMs`, `retryCount`, `fallbackUsed`
 - **AIStreamChunk**: `text` (delta), `done?`, `usage?`, `modelUsed?`, `finishReason?` (on the done chunk), `requestId?` (on the done chunk), `durationMs?` (on the done chunk), `timeToFirstTokenMs?` (on the done chunk) `reasoning?` (thinking delta; `text` is empty on such chunks)
 - **TokenUsage**: `promptTokens?`, `completionTokens?`, `totalTokens?`, `cachedTokens?`
-- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'eager' | 'lazy' | 'none'`), `timeout?`, `streamIdleTimeout?`
-- **BaseProviderConfig**: accepted by every built-in provider constructor: `baseURL?`, `headers?`, `timeout?`, `streamIdleTimeout?`, `models?` (seeds the supported list, skips discovery), `fetch?` (custom `fetch`, for proxies or tests)
-- **OpenAICompatibleProvider config**: `BaseProviderConfig` plus `id?`, `name?`, `apiKey?`, `modelFilter?`, `defaultModel?`, `defaultMaxTokens?`, `requireApiKey?`, `streamUsage?`, `apiKeyEnv?`
+- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'eager' | 'lazy' | 'none'`), `timeout?`, `streamIdleTimeout?`, `hooks?` (`{ onRequest?, onResponse?, onError? }`)
+- **BaseProviderConfig**: accepted by every built-in provider constructor: `baseURL?`, `headers?`, `timeout?`, `streamIdleTimeout?`, `models?` (seeds the supported list, skips discovery), `modelCacheTtlMs?` (default 300000), `fetch?` (custom `fetch`, for proxies or tests)
+- **OpenAICompatibleProvider config**: `BaseProviderConfig` plus `preset?` (`'groq' | 'openrouter' | 'deepseek' | 'mistral' | 'xai' | 'together' | 'agent-platform'`), `id?`, `name?`, `apiKey?`, `modelFilter?`, `defaultModel?`, `defaultMaxTokens?`, `requireApiKey?`, `streamUsage?`, `apiKeyEnv?`
+- **OllamaProvider config**: `BaseProviderConfig` plus `cli?` (`runOllamaCLI` from `/ollama-cli`), `ollamaExecutablePath?`, `preferCLI?`
 - **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
 - **AIError**: see [Errors](#errors)
 - **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`; `processStream` is optional (the factory falls back to one chunk from `process`)
@@ -579,15 +647,17 @@ retryCount: 2
 
 ## Providers
 
-| Provider | Type | Streams | JSON mode | Notes |
-|---------|------|:-:|:-:|--------|
-| **Ollama** | Local | ✅ | ✅ | API + CLI; list/pull/rm/show/ps/run; tested |
-| **LM Studio** | Local | ✅ | ✅ | localhost:1234; OpenAI-compatible; tested |
-| **OpenAI** | Cloud | ✅ | ✅ | API key required |
-| **Anthropic** | Cloud | ✅ | ✅ (system-prompt instruction, not native) | API key required |
-| **Gemini** | Cloud | ✅ | ✅ + `responseSchema` | API key required; tested |
+| Provider | Type | Streams | JSON mode | `baseURL` | Notes |
+|---------|------|:-:|:-:|:-:|--------|
+| **Ollama** | Local | ✅ | ✅ | ✅ | API + CLI; list/pull/rm/show/ps/run; tested |
+| **LM Studio** | Local | ✅ | ✅ | ✅ | localhost:1234; OpenAI-compatible; tested |
+| **OpenAI** | Cloud | ✅ | ✅ | ✅ | API key required |
+| **Anthropic** | Cloud | ✅ | ✅ (system-prompt instruction, not native) | ✅ | API key required |
+| **Gemini** | Cloud | ✅ | ✅ + `responseSchema` | ✅ | API key required; tested |
+| **Groq**, **OpenRouter**, **DeepSeek**, **Mistral**, **xAI**, **Together** | Cloud | ✅ | ✅ | ✅ | `OpenAICompatibleProvider` presets; API key required |
+| Any OpenAI-compatible server (vLLM, llama.cpp, ...) | Either | ✅ | ✅ | ✅ | `new OpenAICompatibleProvider({ id, baseURL })` |
 
-All five stream for real: SSE for OpenAI, LM Studio, Anthropic and Gemini; NDJSON for Ollama.
+Every provider streams for real: SSE for the OpenAI dialect, Anthropic and Gemini; NDJSON for Ollama.
 
 The factory probes providers per `discover` (default `'eager'`, see [Discovery](#discovery)) and keeps those that pass the connection check. Use `getProvider('ollama')` (etc.) to use a specific one.
 

@@ -6,12 +6,12 @@ Machine: local dev machine (Windows), single run per script, see command column.
 
 | Metric | Target | Result | Pass | Command |
 |---|---|---|---|---|
-| Per-call overhead above raw `fetch` (non-stream), p50 | < 1 ms | OpenAIProvider −0.122 ms, AIFactory −0.126 ms (both faster than raw fetch) | yes | `npm run bench:overhead` |
-| Per-call overhead above raw `fetch` (non-stream), p99 | < 3 ms | OpenAIProvider −0.646 ms, AIFactory −0.941 ms | yes | `npm run bench:overhead` |
-| Streaming overhead per chunk | < 0.05 ms | raw 16.52 µs/chunk, `processStream` 7.64 µs/chunk (delta −8.87 µs) | yes | `npm run bench:stream` |
-| Memory for a 1 MB streamed answer | flat, far below 1 MB | 296.5 KB heapUsed delta for 1,048,580 chars streamed | yes | `npm run bench:stream -- --size` |
-| Cold `import` of core entry | < 15 ms, zero network | median 9.83 ms over 5 runs (9.81, 9.82, 9.83, 9.84, 19.78); no-network assertion passed | yes | `npm run bench:import` |
-| Published size (`.` entry, minified, gz) | < 12 kB | raw 42,958 B, gz 13,543 B (after reasoning support, hints and fallback rules landed; earlier in the day 12,200 B) | no, 1.5 kB over; Phase 2 subpath exports move the Ollama CLI and per-provider code out of `.` | `npm run bench:size` |
+| Per-call overhead above raw `fetch` (non-stream), p50 | < 1 ms | OpenAIProvider −0.118 ms, AIFactory −0.123 ms (both faster than raw fetch; 1.8.0 run) | yes | `npm run bench:overhead` |
+| Per-call overhead above raw `fetch` (non-stream), p99 | < 3 ms | OpenAIProvider −0.453 ms, AIFactory −0.905 ms | yes | `npm run bench:overhead` |
+| Streaming overhead per chunk | < 0.05 ms | raw 17.08 µs/chunk, `processStream` 8.20 µs/chunk (delta −8.88 µs) | yes | `npm run bench:stream` |
+| Memory for a 1 MB streamed answer | flat, far below 1 MB | 299.2 KB heapUsed delta for 1,048,580 chars streamed | yes | `npm run bench:stream -- --size` |
+| Cold `import` of core entry | < 15 ms, zero network | median 9.17 ms over 5 runs (9.08, 9.08, 9.17, 9.47, 9.53); no-network assertion passed | yes | `npm run bench:import` |
+| Published size (`.` entry, minified, gz) | < 12 kB | raw 44,793 B, gz 14,033 B (1.8.0: presets, hooks, `providerOptions`, model cache added; `ollama-cli` removed) | no, 2 kB over; `.` still re-exports every provider, so subpaths are what shrink a consumer's bundle: one provider entry is 6,052–6,729 B gz (`openai-compatible` 6,580 B) | `npm run bench:size` |
 
 ## Notes
 

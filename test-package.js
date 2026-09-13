@@ -4,8 +4,8 @@ async function testPackage() {
   console.log('🧪 Testing Bot Client Package Before Publishing\n');
 
   try {
-    // Wait for initialization
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Discovery runs on first use, not at import.
+    await aiFactory.ready();
 
     console.log('1️⃣ Testing Basic Functionality:');
     
@@ -48,9 +48,6 @@ async function testPackage() {
       defaultProvider: workingProviders[0] || 'ollama'
     });
     
-    // Wait for custom factory initialization
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
     const customResponse = await customFactory.generate('Test from custom factory');
     console.log('✅ Custom factory response:', customResponse.substring(0, 50) + '...');
 
@@ -61,7 +58,6 @@ async function testPackage() {
       const workingFactory = new AIFactory({
         defaultProvider: 'ollama'
       });
-      await new Promise(resolve => setTimeout(resolve, 1000));
       await workingFactory.generate('', { maxTokens: -1 }); // Invalid request
     } catch (error) {
       console.log('✅ Error handling works:', error.message.substring(0, 50) + '...');
@@ -74,22 +70,11 @@ async function testPackage() {
       console.log('✅ Provider selection works for model:', models[0]);
     }
 
-    // Test 9: Test model support checking
-    console.log('\n8️⃣ Testing Model Support:');
-    const isSupported = aiFactory.isModelSupported(models[0]);
-    console.log('✅ Model support checking works:', isSupported);
-
-    // Test 10: Test configuration
-    console.log('\n9️⃣ Testing Configuration:');
-    const config = aiFactory.getConfig();
-    console.log('✅ Configuration accessible:', Object.keys(config));
-
     console.log('\n🎉 All tests passed! Package is ready for publishing.');
     console.log('\n📊 Package Summary:');
     console.log(`- Providers: ${providers.length} available`);
     console.log(`- Models: ${models.length} supported`);
     console.log(`- Working providers: ${Object.values(status).filter(Boolean).length}`);
-    console.log(`- Default provider: ${config.defaultProvider || 'Not set'}`);
 
   } catch (error) {
     console.error('❌ Package test failed:', error);

@@ -1,6 +1,6 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages } from './base-provider.js';
+import { BaseProvider, buildChatMessages, firstEnv, mergeBody } from './base-provider.js';
 import { parseSSE } from '../core/http.js';
 
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com';
@@ -58,7 +58,7 @@ export class GeminiProvider extends BaseProvider {
 
   constructor(config: GeminiProviderConfig = {}) {
     super(config);
-    this.apiKey = config.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.BOT_CLIENT_GEMINI_KEY;
+    this.apiKey = config.apiKey ?? firstEnv(['GEMINI_API_KEY', 'BOT_CLIENT_GEMINI_KEY']);
     this.base = (config.baseURL ?? DEFAULT_BASE).replace(/\/+$/, '');
   }
 
@@ -76,6 +76,7 @@ export class GeminiProvider extends BaseProvider {
 
   async testConnection(): Promise<boolean> {
     if (!this.apiKey) return false;
+    if (this.cached()) return true;
     try {
       await this.http(`${this.base}/v1beta/models`, { params: { key: this.apiKey, pageSize: '1' } });
       return true;
@@ -86,6 +87,8 @@ export class GeminiProvider extends BaseProvider {
 
   async discoverModels(): Promise<string[]> {
     if (!this.apiKey) return [];
+    const hit = this.cached();
+    if (hit) return hit;
     try {
       const response = await this.http(`${this.base}/v1beta/models`, { params: { key: this.apiKey } });
       const models = response?.models ?? [];
@@ -148,7 +151,7 @@ export class GeminiProvider extends BaseProvider {
     if (systemParts.length > 0) {
       body.systemInstruction = { parts: systemParts };
     }
-    return body;
+    return mergeBody(body, request.providerOptions);
   }
 
   private resolveModel(request: AIRequest): string {

@@ -8,6 +8,13 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { OllamaProvider } from './providers/ollama-provider.js';
+import { OpenAIProvider } from './providers/openai-provider.js';
+import { AnthropicProvider } from './providers/anthropic-provider.js';
+import { GeminiProvider } from './providers/gemini-provider.js';
+import { LMStudioProvider } from './providers/lmstudio-provider.js';
+import { OpenAICompatibleProvider, PRESETS, type PresetId } from './providers/openai-compatible.js';
+import { runOllamaCLI } from './ollama-cli.js';
+import type { AIProvider } from './types/index.js';
 
 const KNOWN_KEYS = [
   'BOT_CLIENT_PROVIDER',
@@ -56,7 +63,13 @@ bot-client - Ollama models, API keys, and provider config
 Usage:
   npx @tanvoid0/bot-client ollama <command> [args...]
   npx @tanvoid0/bot-client keys <command> [args...]
+  npx @tanvoid0/bot-client doctor [provider...]
   npx @tanvoid0/bot-client help
+
+Doctor:
+  Lists each provider's models, then sends it a one-line prompt and prints
+  the model that answered or the classified error. Built-ins by default;
+  name presets (groq, openrouter, deepseek, mistral, xai, together) to add them.
 
 Ollama commands (uses local API when server is up, else ollama CLI):
   list, ls          List models
@@ -77,6 +90,8 @@ Examples:
   npx @tanvoid0/bot-client keys list
   npx @tanvoid0/bot-client keys set BOT_CLIENT_OPENAI_KEY sk-...
   npx @tanvoid0/bot-client keys get BOT_CLIENT_OPENAI_KEY --show
+  npx @tanvoid0/bot-client doctor
+  npx @tanvoid0/bot-client doctor groq
 `;
   console.log(help.trim());
 }
@@ -85,7 +100,8 @@ async function runOllama(argv: string[]): Promise<number> {
   const cmd = argv[0]?.toLowerCase();
   const rest = argv.slice(1);
   const provider = new OllamaProvider({
-    baseURL: process.env.OLLAMA_HOST ?? 'http://localhost:11434'
+    baseURL: process.env.OLLAMA_HOST ?? 'http://localhost:11434',
+    cli: runOllamaCLI,
   });
 
   if (!cmd || cmd === 'help') {
@@ -255,6 +271,37 @@ function runKeys(argv: string[]): number {
   return 1;
 }
 
+/** One line per provider: reachability, first model, and the classified error with its hint when it fails. */
+async function runDoctor(argv: string[]): Promise<number> {
+  const providers: AIProvider[] = [
+    new OpenAIProvider(),
+    new AnthropicProvider(),
+    new GeminiProvider(),
+    new OllamaProvider({ baseURL: process.env.OLLAMA_HOST ?? 'http://localhost:11434', cli: runOllamaCLI }),
+    new LMStudioProvider(),
+  ];
+  for (const name of argv) {
+    if (!(name in PRESETS)) {
+      console.error(`Unknown preset "${name}"; known: ${Object.keys(PRESETS).join(', ')}`);
+      return 1;
+    }
+    providers.push(new OpenAICompatibleProvider({ preset: name as PresetId }));
+  }
+  const rows = await Promise.all(
+    providers.map(async (p) => {
+      const t0 = Date.now();
+      const models = await p.discoverModels().catch(() => [] as string[]);
+      const r = await p.process({ prompt: 'Reply with the single word: ok', maxTokens: 16, timeout: 20_000 });
+      const ms = Date.now() - t0;
+      const status = r.success ? `ok    ${r.modelUsed}` : `FAIL  ${r.errorInfo?.code ?? 'UNKNOWN'}`;
+      const detail = r.success ? `${models.length} models` : `${r.error}${r.errorInfo?.hint ? ` — ${r.errorInfo.hint}` : ''}`;
+      return { id: p.providerId, line: `${p.providerId.padEnd(12)} ${status.padEnd(34)} ${detail} (${ms} ms)`, ok: r.success };
+    })
+  );
+  for (const row of rows) console.log(row.line);
+  return rows.some((r) => r.ok) ? 0 : 1;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const top = argv[0]?.toLowerCase();
@@ -267,6 +314,7 @@ async function main(): Promise<number> {
 
   if (top === 'ollama') return runOllama(rest);
   if (top === 'keys') return runKeys(rest);
+  if (top === 'doctor') return runDoctor(rest);
 
   console.error('Unknown command:', top);
   printHelp();
