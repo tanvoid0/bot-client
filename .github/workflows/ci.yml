@@ -65,7 +65,7 @@ jobs:
       run: npm audit --audit-level=moderate --registry=https://registry.npmjs.org/
     
     - name: Check for secrets
-      uses: trufflesecurity/trufflehog@v3
+      uses: trufflesecurity/trufflehog@v3.97.4
       with:
         path: ./
         base: HEAD~1
