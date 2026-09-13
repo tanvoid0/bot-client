@@ -1,7 +1,7 @@
 {
   "name": "@tanvoid0/bot-client",
   "version": "1.8.0",
-  "description": "Zero-dependency TypeScript client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. Real streaming, JSON mode, typed provider errors with hints, retries with backoff, static model routing, lifecycle hooks. Node 18+, Bun, Deno, edge.",
+  "description": "Zero-dependency TypeScript client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. Real streaming, tool calling, structured output (Standard Schema or JSON Schema), images, typed provider errors with hints, retries with backoff, static model routing. Node 18+, Bun, Deno, edge, browsers.",
   "sideEffects": false,
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -164,7 +164,15 @@
     "edge",
     "cloudflare-workers",
     "bun",
-    "deno"
+    "deno",
+    "tool-calling",
+    "function-calling",
+    "structured-output",
+    "json-schema",
+    "zod",
+    "vision",
+    "vercel-ai-sdk-alternative",
+    "langchain-alternative"
   ],
   "author": "tanvoid0",
   "license": "MIT",
@@ -196,7 +204,9 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "MIGRATION.md",
+    "LICENSE",
+    "llms.txt"
   ],
   "publishConfig": {
     "access": "public"

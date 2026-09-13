@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 (docs/SEO, §1.1 comparison column) then release 2.0.0.
+Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 docs done except the typedoc site (needs GitHub Pages enabled on the repo) and the unscoped-name decision (owner's call); then release 2.0.0.
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
@@ -633,10 +633,10 @@ if a 2.0 is not ready.
 
 ### Phase 4 — docs and SEO (with 2.0.0 release)
 
-- [ ] README rewrite per §10.3 and §12
-- [ ] package.json metadata per §10.1; GitHub topics; `llms.txt`
+- [x] README rewrite per §10.3 and §12 (2026-09-13: one-sentence hero, five "Why" bullets, dated comparison table, Development → CONTRIBUTING)
+- [x] package.json metadata per §10.1; `llms.txt` (2026-09-13; `MIGRATION.md` and `llms.txt` added to `files`). GitHub topics: set in the repo settings by hand, not tracked here
 - [ ] Docs site from typedoc on GitHub Pages; `homepage` updated
-- [ ] `CONTRIBUTING.md` with provider template
+- [x] `CONTRIBUTING.md` with provider template (2026-09-13)
 - [ ] Decide on unscoped name
 
 ### Phase 5 — agent layer (2.1.0, additive)
@@ -690,17 +690,17 @@ Tick when the README reflects reality. Do not tick early; the README is the prod
 - [x] Streaming section: typed chunks (no legacy flag exists)
 - [x] Types block updated; removed list points at MIGRATION.md
 - [x] Providers table: Tools, Schema, Images columns
-- [ ] Comparison table (§1.1) with 2.0 column filled and dated
+- [x] Comparison table (§1.1) with 2.0 column filled and dated
 - [x] Link to `MIGRATION.md`; breaking list in CHANGELOG
 - [x] Badges: bundle size (12.1 kB, `./core` + one provider), runtimes
 
 **After Phase 4**
-- [ ] First sentence contains: zero-dependency, TypeScript, LLM client, the provider names, streaming, tool calling
-- [ ] "Why bot-client" five bullets
+- [x] First sentence contains: zero-dependency, TypeScript, LLM client, the provider names, streaming, tool calling
+- [x] "Why bot-client" five bullets
 - [ ] Docs site link in badges and footer
-- [ ] `llms.txt` present and linked
-- [ ] package.json `description` and `keywords` match README wording
-- [ ] Remove Development section's internal notes; point to CONTRIBUTING
+- [x] `llms.txt` present and linked
+- [x] package.json `description` and `keywords` match README wording
+- [x] Remove Development section's internal notes; point to CONTRIBUTING
 - [ ] npm page preview checked (`npm view`, README render on npmjs.com)
 
 **After Phase 5**

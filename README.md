@@ -7,7 +7,15 @@
 ![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.1%20kB%20gz-blue)
 ![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
 
-Zero-dependency TypeScript LLM client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, plus Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any other OpenAI-compatible API through one `OpenAICompatibleProvider`. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+); the main entry has no Node built-ins, so it runs in Bun, Deno, Workers and browsers too. One request shape for every provider, with **real streaming** on all five, **tool calling** with an automatic `maxSteps` loop, **structured output** through any Standard Schema (Zod, Valibot, ArkType) or plain JSON Schema, **images** in messages, **typed provider errors** (a code and a hint, the provider's own message never rewritten), **retries with backoff**, a **stream idle timeout**, and `finishReason` on every response. Model routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models, API keys and a `doctor` that pings every provider.
+Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them.
+
+## Why bot-client
+
+- **Zero runtime dependencies.** Native `fetch`, no Node built-ins in the main entry: Node 18+, Bun, Deno, Workers, browsers. `/core` plus one provider bundles to 12.1 kB gzipped.
+- **Local first, cloud with one env var.** Ollama and LM Studio work with no config; `OPENAI_API_KEY` (and friends) switches on cloud. Routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins.
+- **One request shape, every capability.** `messages` with images, `tools` with an automatic `maxSteps` loop, `schema` through any Standard Schema (Zod, Valibot, ArkType) or plain JSON Schema, typed stream chunks, `finishReason` and `usage` on every answer.
+- **Honest errors.** Every failure is an `AIError` with a `code`, the provider's own message never rewritten, and a `hint` saying what to do next. Retries with backoff only on what is retryable; fallback across providers; a stream idle timeout.
+- **Batteries for local models.** Ollama pull/list/rm/show/ps/run from the library or `npx @tanvoid0/bot-client`, plus a `doctor` that pings every provider.
 
 Upgrading from 1.x? Read [MIGRATION.md](MIGRATION.md): every removed input fails with an error naming its replacement.
 
@@ -87,7 +95,7 @@ const res = await aiFactory.process({
 const { fruits } = JSON.parse(res.data!);
 ```
 
-`responseSchema` is passed through only where the provider accepts one (Gemini today) and in that provider's own dialect; it is not translated between providers.
+For a shape the provider is asked to follow and a parsed, validated result, use `schema` ([Structured output](#structured-output)).
 
 ---
 
@@ -273,6 +281,28 @@ Streaming rule: retry and fallback only run before the first chunk arrives. Once
 | Published size (minified, gz) | `.` entry 14.0 kB; one provider subpath 6.1–6.7 kB |
 
 Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
+
+## Comparison
+
+Snapshot taken 2026-09-13 from each project's public docs; corrections welcome as issues.
+
+| | Vercel AI SDK 6 | token.js | multi-llm-ts 5 | llm.js | **bot-client 2.0** |
+|---|---|---|---|---|---|
+| Providers | ~30 via packages | 200+ (OpenAI format) | ~20 | ~10 | 5 built in, 6 presets, any OpenAI-compatible host |
+| Runtime deps | many (zod, ai-core, per-provider pkgs) | some | some | some | **0** |
+| Streaming everywhere | yes | yes | yes | yes | **yes** (SSE and NDJSON, typed chunks) |
+| Tool calling | yes, agent loop | yes | yes | yes | **yes**, `maxSteps` loop, leaked `<function=>` recovery |
+| Structured output | Zod `generateObject` | JSON mode | Zod | JSON mode | **any Standard Schema** (Zod, Valibot, ArkType) or JSON Schema |
+| Images in | yes | yes | yes | yes | **yes** (URL, bytes, base64) |
+| Typed error taxonomy | yes (`APICallError`, retryable) | partial | partial | partial | **yes** (`code`, `retryable`, `hint`, provider message untouched) |
+| Retry with backoff | yes | no | no | no | **yes**, retryable codes only, `Retry-After` honoured |
+| Edge / browser / Workers | yes | yes | yes | yes | **yes** (`/ollama-cli` is the only Node-only entry) |
+| Agent class / multi-agent | `Agent`, agents as tools | no | no | no | no (tool loop only; planned 2.1) |
+| MCP client | via `@modelcontextprotocol/sdk` | no | no | no | no (planned 2.1) |
+| Embeddings | yes | no | yes | yes | no (planned 2.1) |
+| Local-first (Ollama, LM Studio) zero config | no | no | partial | yes | **yes** |
+| Ollama management (pull/list/rm/ps) | no | no | no | no | **yes** |
+| npx CLI | no | no | no | no | **yes** (`doctor`, models, keys) |
 
 ---
 
@@ -750,14 +780,9 @@ if (provider) {
 
 ---
 
-## Development
+## Contributing
 
-```bash
-npm install && npm run build && npm test
-npm run cli -- help
-```
-
-See **examples/** for more usage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the gates to run and a template for adding a provider. [examples/](examples) has runnable scripts; [llms.txt](llms.txt) is the index for coding agents.
 
 ---
 
