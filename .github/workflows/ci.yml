@@ -124,27 +124,27 @@ jobs:
     - name: Run tests
       run: npm test
     
-    - name: Check if package exists
-      id: check-package
-      run: |
-        if npm view ${{ steps.pkg.outputs.name }} version >/dev/null 2>&1; then
-          echo "exists=true" >> $GITHUB_OUTPUT
-        else
-          echo "exists=false" >> $GITHUB_OUTPUT
-        fi
-    
     - name: Publish to npm
       run: |
         if [ -z "$NODE_AUTH_TOKEN" ]; then
           echo "::error::NPM_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (name: NPM_TOKEN, value: your npm access token)."
           exit 1
         fi
-        npm publish
+        # Idempotent: a release created after a dispatch publish must not fail on "already published".
+        if npm view ${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }} version >/dev/null 2>&1; then
+          echo "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }} is already on npm; skipping"
+        else
+          npm publish
+        fi
 
     - name: Publish the @tanvoid0/bot-client re-export shim
       run: |
         npm run build:shim
-        npm publish ./shim
+        if npm view @tanvoid0/bot-client@${{ steps.pkg.outputs.version }} version >/dev/null 2>&1; then
+          echo "shim ${{ steps.pkg.outputs.version }} is already on npm; skipping"
+        else
+          npm publish ./shim
+        fi
     
     - name: Create GitHub Release
       if: github.event_name == 'workflow_dispatch'
