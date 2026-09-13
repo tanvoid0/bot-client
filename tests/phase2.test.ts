@@ -1,5 +1,4 @@
 /** 1.8.0: presets, providerOptions, hooks, catalog additions, model-list cache, Ollama CLI injection, entry purity. */
-import { execFileSync } from 'node:child_process';
 import { AIFactory } from '../src/ai-factory.js';
 import { AIError } from '../src/core/errors.js';
 import { guessProvider } from '../src/core/catalog.js';
@@ -196,9 +195,10 @@ describe('Ollama CLI injection', () => {
 });
 
 describe('entry purity', () => {
-  const esbuild = require.resolve('esbuild/bin/esbuild');
+  // The JS API, not `bin/esbuild`: on Linux that file is the native binary, not a script `node` can run.
+  const { buildSync } = require('esbuild');
   const bundle = (entry: string) =>
-    execFileSync(process.execPath, [esbuild, entry, '--bundle', '--platform=browser', '--format=esm', '--log-level=error'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    buildSync({ entryPoints: [entry], bundle: true, platform: 'browser', format: 'esm', write: false, logLevel: 'silent' }).outputFiles[0].text;
 
   test('the main entry and every provider subpath bundle for the browser with no node built-ins', () => {
     for (const entry of ['src/index.ts', 'src/core.ts', 'src/providers/openai-provider.ts', 'src/providers/anthropic-provider.ts', 'src/providers/gemini-provider.ts', 'src/providers/ollama-provider.ts', 'src/providers/lmstudio-provider.ts', 'src/providers/openai-compatible.ts']) {
