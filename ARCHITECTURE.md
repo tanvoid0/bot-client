@@ -608,7 +608,7 @@ if a 2.0 is not ready.
 - [x] `durationMs`, `timeToFirstTokenMs`; drop `confidence` (D10, additive: keep old fields in 1.x)
 - [x] `finishReason` on responses and done-chunk; Gemini SAFETY / MAX_TOKENS surfaced (D13); Ollama `NO_MODEL` (D14)
 - [x] `bench/` scripts and first numbers (2026-09-13: overhead below noise, 7.6 µs/chunk, 9.8 ms cold import, 13.5 kB gz after reasoning support; 1.5 kB over target, Phase 2 subpath exports bring `.` back under, see bench/RESULTS.md)
-- [ ] Fixture-driven provider tests for every row of §5.2
+- [x] Fixture-driven provider tests for every row of §5.2 (2026-09-13: filled the missing cells; found and fixed OpenAI/Anthropic empty-refusal-as-success and Gemini daily-quota-as-RATE_LIMIT)
 
 ### Phase 2 — customisation (non-breaking, target 1.8.0)
 

@@ -105,6 +105,22 @@ describe('OpenAIProvider error classification', () => {
       code: 'OVERLOADED',
       retryable: true,
     },
+    {
+      name: 'permission',
+      status: 403,
+      body: { error: { message: 'Project does not have access to model gpt-4o', type: 'invalid_request_error', code: null } },
+      code: 'PERMISSION',
+      retryable: false,
+      providerCode: 'invalid_request_error',
+    },
+    {
+      name: 'invalid request (other)',
+      status: 400,
+      body: { error: { message: "Unsupported parameter: 'foo'", type: 'invalid_request_error', code: null } },
+      code: 'INVALID_REQUEST',
+      retryable: false,
+      providerCode: 'invalid_request_error',
+    },
   ];
 
   test.each(rows)('$name → $code', async (row) => {
@@ -112,6 +128,38 @@ describe('OpenAIProvider error classification', () => {
     const res = await new OpenAIProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'gpt-4o' });
     expect(res.success).toBe(false);
     assertRow(res.errorInfo, row, row.body.error.message);
+  });
+
+  test('Retry-After as an HTTP date → retryAfterMs', async () => {
+    const at = new Date(Date.now() + 30_000).toUTCString();
+    stub(429, { error: { message: 'Rate limit reached', code: 'rate_limit_exceeded' } }, { 'retry-after': at });
+    const res = await new OpenAIProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'gpt-4o' });
+    expect(res.errorInfo?.retryAfterMs).toBeGreaterThan(25_000);
+    expect(res.errorInfo?.retryAfterMs).toBeLessThanOrEqual(30_000);
+  });
+
+  test('a 200 body with finish_reason content_filter and no content is CONTENT_FILTER', async () => {
+    stub(200, { choices: [{ message: { role: 'assistant', content: null }, finish_reason: 'content_filter' }] });
+    const res = await new OpenAIProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'gpt-4o' });
+    expect(res.success).toBe(false);
+    expect(res.errorInfo?.code).toBe('CONTENT_FILTER');
+    expect(res.errorInfo?.retryable).toBe(false);
+    expect(res.errorInfo?.hint?.length).toBeGreaterThan(0);
+  });
+
+  test('a 200 body with finish_reason length and text succeeds with finishReason length', async () => {
+    stub(200, { choices: [{ message: { role: 'assistant', content: 'partial' }, finish_reason: 'length' }] });
+    const res = await new OpenAIProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'gpt-4o' });
+    expect(res.success).toBe(true);
+    expect(res.data).toBe('partial');
+    expect(res.finishReason).toBe('length');
+  });
+
+  test('ENOTFOUND → PROVIDER_UNREACHABLE', async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }));
+    const res = await new OpenAIProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'gpt-4o' });
+    expect(res.errorInfo?.code).toBe('PROVIDER_UNREACHABLE');
+    expect(res.errorInfo?.message).toContain('ENOTFOUND');
   });
 
   test('x-request-id header is surfaced as requestId', async () => {
@@ -175,6 +223,22 @@ describe('AnthropicProvider error classification', () => {
       retryable: false,
       providerCode: 'invalid_request_error',
     },
+    {
+      name: 'permission_error',
+      status: 403,
+      body: { type: 'error', error: { type: 'permission_error', message: 'Your API key does not have permission to use the specified resource.' } },
+      code: 'PERMISSION',
+      retryable: false,
+      providerCode: 'permission_error',
+    },
+    {
+      name: 'api_error',
+      status: 500,
+      body: { type: 'error', error: { type: 'api_error', message: 'An unexpected error has occurred internal to our systems.' } },
+      code: 'SERVER',
+      retryable: true,
+      providerCode: 'api_error',
+    },
   ];
 
   test.each(rows)('$name → $code', async (row) => {
@@ -182,6 +246,22 @@ describe('AnthropicProvider error classification', () => {
     const res = await new AnthropicProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'claude-3-5' });
     expect(res.success).toBe(false);
     assertRow(res.errorInfo, row, row.body.error.message);
+  });
+
+  test('a 200 body with stop_reason refusal and no text is CONTENT_FILTER', async () => {
+    stub(200, { content: [], stop_reason: 'refusal', usage: { input_tokens: 5, output_tokens: 0 } });
+    const res = await new AnthropicProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'claude-3-5' });
+    expect(res.success).toBe(false);
+    expect(res.errorInfo?.code).toBe('CONTENT_FILTER');
+    expect(res.errorInfo?.hint?.length).toBeGreaterThan(0);
+  });
+
+  test('a 200 body with stop_reason max_tokens and text succeeds with finishReason length', async () => {
+    stub(200, { content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens', usage: { input_tokens: 5, output_tokens: 8 } });
+    const res = await new AnthropicProvider({ apiKey: 'k' }).process({ prompt: 'hi', modelId: 'claude-3-5' });
+    expect(res.success).toBe(true);
+    expect(res.data).toBe('partial');
+    expect(res.finishReason).toBe('length');
   });
 
   it('invalid_request_error (other) → INVALID_REQUEST, with a hint', async () => {
@@ -254,6 +334,69 @@ describe('GeminiProvider error classification', () => {
       retryable: true,
       providerCode: 'UNAVAILABLE',
     },
+    {
+      name: 'PERMISSION_DENIED',
+      status: 403,
+      body: { error: { code: 403, message: 'Permission denied on resource project 123', status: 'PERMISSION_DENIED' } },
+      code: 'PERMISSION',
+      retryable: false,
+      providerCode: 'PERMISSION_DENIED',
+    },
+    {
+      name: 'RESOURCE_EXHAUSTED (daily quota)',
+      status: 429,
+      body: {
+        error: {
+          code: 429,
+          message: 'You exceeded your current quota, please check your plan and billing details.',
+          status: 'RESOURCE_EXHAUSTED',
+          details: [
+            {
+              '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+              violations: [
+                {
+                  quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests',
+                  quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      code: 'QUOTA',
+      retryable: false,
+      providerCode: 'RESOURCE_EXHAUSTED',
+    },
+    {
+      name: 'INTERNAL',
+      status: 500,
+      body: { error: { code: 500, message: 'An internal error has occurred.', status: 'INTERNAL' } },
+      code: 'SERVER',
+      retryable: true,
+      providerCode: 'INTERNAL',
+    },
+    {
+      name: 'INVALID_ARGUMENT (context)',
+      status: 400,
+      body: {
+        error: {
+          code: 400,
+          message: 'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
+          status: 'INVALID_ARGUMENT',
+        },
+      },
+      code: 'CONTEXT_LENGTH',
+      retryable: false,
+      providerCode: 'INVALID_ARGUMENT',
+    },
+    {
+      name: 'INVALID_ARGUMENT (other)',
+      status: 400,
+      body: { error: { code: 400, message: 'Invalid JSON payload received. Unknown name "foo".', status: 'INVALID_ARGUMENT' } },
+      code: 'INVALID_REQUEST',
+      retryable: false,
+      providerCode: 'INVALID_ARGUMENT',
+    },
   ];
 
   test.each(rows)('$name → $code', async (row) => {
@@ -313,6 +456,36 @@ describe('OllamaProvider error classification', () => {
     expect(res.success).toBe(false);
     expect(res.errorInfo?.code).toBe('PROVIDER_UNREACHABLE');
     expect(res.errorInfo?.hint).toContain('http://localhost:11434');
+  });
+
+  test('context length → CONTEXT_LENGTH', async () => {
+    stub(400, { error: 'input length exceeds the context length' });
+    const res = await new OllamaProvider().process({ prompt: 'hi', modelId: 'llama9' });
+    expect(res.errorInfo?.code).toBe('CONTEXT_LENGTH');
+    expect(res.errorInfo?.retryable).toBe(false);
+    expect(res.errorInfo?.message).toBe('input length exceeds the context length');
+  });
+
+  test('400 other → INVALID_REQUEST', async () => {
+    stub(400, { error: 'invalid options: foo' });
+    const res = await new OllamaProvider().process({ prompt: 'hi', modelId: 'llama9' });
+    expect(res.errorInfo?.code).toBe('INVALID_REQUEST');
+    expect(res.errorInfo?.statusCode).toBe(400);
+  });
+
+  test('done_reason length → finishReason length', async () => {
+    stub(200, {
+      model: 'llama9',
+      message: { role: 'assistant', content: 'partial' },
+      done: true,
+      done_reason: 'length',
+      prompt_eval_count: 3,
+      eval_count: 8,
+    });
+    const res = await new OllamaProvider().process({ prompt: 'hi', modelId: 'llama9' });
+    expect(res.success).toBe(true);
+    expect(res.finishReason).toBe('length');
+    expect(res.usage?.totalTokens).toBe(11);
   });
 
   test('no models and no modelId → NO_MODEL without calling fetch', async () => {

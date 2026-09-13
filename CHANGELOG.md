@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A 200 reply whose only content is a refusal (`finish_reason: content_filter` on OpenAI-format hosts, `stop_reason: refusal` on Anthropic) is now a `CONTENT_FILTER` failure, as it already was for Gemini, instead of a success with empty `data`.
+- Gemini `RESOURCE_EXHAUSTED` naming a per-day quota (`quotaId: ...PerDay...`) classifies as `QUOTA` (not retryable); per-minute limits stay `RATE_LIMIT`.
+- `tests/errors.test.ts` now covers every cell of the ARCHITECTURE §5.2 classification table.
+
 ## [1.8.0] - 2026-09-13
 
 ### Added

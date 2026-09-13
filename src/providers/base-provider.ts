@@ -226,6 +226,13 @@ export abstract class BaseProvider implements AIProvider {
   // ---- responses ----------------------------------------------------------
 
   protected ok(data: string, extra: OkExtra = {}): AIResponse {
+    // A 200 whose only content is a content_filter finish is a refusal, not an answer.
+    if (extra.finishReason === 'content_filter' && !data) {
+      return this.fail(
+        this.error('CONTENT_FILTER', `${this.providerName} blocked the answer`, { model: extra.modelUsed }),
+        extra.modelUsed
+      );
+    }
     const usage = extra.usage;
     return {
       success: true,

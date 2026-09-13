@@ -111,7 +111,10 @@ export class GeminiProvider extends BaseProvider {
     const out: Refinement = { providerCode: reason ?? status };
     if (reason === 'API_KEY_INVALID' || status === 'UNAUTHENTICATED') out.code = 'AUTH';
     else if (status === 'PERMISSION_DENIED') out.code = 'PERMISSION';
-    else if (status === 'RESOURCE_EXHAUSTED') out.code = 'RATE_LIMIT';
+    // Per-minute limits come back as RESOURCE_EXHAUSTED with a retryDelay; a
+    // spent daily quota uses the same status but names a PerDay quotaId.
+    else if (status === 'RESOURCE_EXHAUSTED')
+      out.code = details.some((d) => d?.violations?.some((v: any) => /perday|daily/i.test(v?.quotaId ?? ''))) ? 'QUOTA' : 'RATE_LIMIT';
     else if (status === 'NOT_FOUND') out.code = 'MODEL_NOT_FOUND';
     else if (status === 'UNAVAILABLE') out.code = 'OVERLOADED';
     else if (status === 'INTERNAL') out.code = 'SERVER';
