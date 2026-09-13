@@ -87,6 +87,17 @@
       },
       "default": "./dist/providers/openai-compatible.js"
     },
+    "./core": {
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.js"
+      },
+      "require": {
+        "types": "./dist/cjs/core.d.ts",
+        "default": "./dist/cjs/core.js"
+      },
+      "default": "./dist/core.js"
+    },
     "./ollama-cli": {
       "import": {
         "types": "./dist/ollama-cli.d.ts",
@@ -216,6 +227,9 @@
       ],
       "ollama-cli": [
         "dist/ollama-cli.d.ts"
+      ],
+      "core": [
+        "dist/core.d.ts"
       ]
     }
   }

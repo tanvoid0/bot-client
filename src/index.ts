@@ -1,7 +1,32 @@
-// Main exports - only what clients need
-export { AIFactory, aiFactory, ensureFactoryReady } from './ai-factory.js';
+// The zero-config entry: everything in `./core` plus the built-in providers,
+// with `AIFactory` defaulting to all five when no `providers` are given.
+export * from './core.js';
+import { AIFactory as CoreFactory } from './ai-factory.js';
+import type { AIProvider } from './types/index.js';
+import { OpenAIProvider } from './providers/openai-provider.js';
+import { AnthropicProvider } from './providers/anthropic-provider.js';
+import { GeminiProvider } from './providers/gemini-provider.js';
+import { OllamaProvider } from './providers/ollama-provider.js';
+import { LMStudioProvider } from './providers/lmstudio-provider.js';
 
-// Providers (for custom factory or direct use)
+export class AIFactory extends CoreFactory {
+  protected override defaults(): AIProvider[] {
+    return [new OpenAIProvider(), new AnthropicProvider(), new GeminiProvider(), new OllamaProvider(), new LMStudioProvider()];
+  }
+}
+
+/**
+ * Shared factory. Constructing it is free — provider discovery is deferred to
+ * the first request — so importing this module touches no network.
+ */
+export const aiFactory = new AIFactory();
+
+/** Shared factory, with provider discovery already run. */
+export async function ensureFactoryReady(): Promise<AIFactory> {
+  await aiFactory.ready();
+  return aiFactory;
+}
+
 export { OpenAICompatibleProvider, PRESETS } from './providers/openai-compatible.js';
 export type { OpenAICompatibleConfig, PresetId } from './providers/openai-compatible.js';
 export { OpenAIProvider } from './providers/openai-provider.js';
@@ -14,52 +39,3 @@ export { LMStudioProvider } from './providers/lmstudio-provider.js';
 export type { LMStudioProviderConfig } from './providers/lmstudio-provider.js';
 export { OllamaProvider } from './providers/ollama-provider.js';
 export type { OllamaProviderConfig } from './providers/ollama-provider.js';
-export { BaseProvider, buildChatMessages, inlineImage, mergeBody, partsOf, textOf } from './providers/base-provider.js';
-// `runOllamaCLI` / `isOllamaCLIAvailable` moved to '@tanvoid0/bot-client/ollama-cli' (1.8.0): they spawn a process, and this entry must run where `fetch` does.
-export type { OllamaCLIResult, OllamaCLIOptions } from './ollama-cli.js';
-
-// Wire-format helpers (for custom providers)
-export { HttpError, streamLines, parseSSE, parseNDJSON } from './core/http.js';
-export type { HttpOptions, SseEvent, FetchLike } from './core/http.js';
-export { guessProvider } from './core/catalog.js';
-export { splitThinkTags, ThinkFilter } from './core/reasoning.js';
-export { openaiTools, parseArgs, recoverLeakedToolCalls, runTools, nextStepRequest } from './core/tools.js';
-export type { RetryOptions } from './core/retry.js';
-
-// Types for requests, responses, and configuration
-export type {
-  AIProvider,
-  AIRequest,
-  Message,
-  MessagePart,
-  TextPart,
-  ImagePart,
-  Tool,
-  ToolCall,
-  ToolResult,
-  Step,
-  AIResponse,
-  AIStreamChunk,
-  AIFactoryConfig,
-  AIProviderConfig,
-  BaseProviderConfig,
-  DiscoveryMode,
-  FinishReason,
-  Hooks,
-  TokenUsage,
-  Logger,
-  ConversationHistory,
-  ContentGenerationRequest,
-  AnalysisRequest,
-  CodeGenerationRequest,
-  ConversationRequest,
-  PostProcessingOptions,
-  ModelCapabilities,
-  ProcessingMetrics,
-  ProviderType,
-  ProviderConfig
-} from './types/index.js';
-
-// Error handling
-export { AIError, toAIError, isRetryableCode } from './core/errors.js';
-export type { AIErrorCode, AIErrorInit, Refinement, ClassifyContext } from './core/errors.js';

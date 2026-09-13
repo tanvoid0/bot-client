@@ -13,7 +13,7 @@ Decisions during Phase 2 that change the plan:
 - Presets are a `preset:` field plus a `PRESETS` table on `OpenAICompatibleProvider`, not six files. `agent-platform` (`http://127.0.0.1:18410/v1`, `AGENT_PLATFORM_KEY`) is in the table.
 - `runOllamaCLI` / `isOllamaCLIAvailable` moved to `./ollama-cli`; `OllamaProvider` takes `cli: runOllamaCLI` by injection. The one 1.8 change that is not additive; called out in CHANGELOG.
 - Factory-level `fetch` / `headers` not added (per-provider covers it). Hooks carry the `AIRequest`, not the wire body.
-- `.` bundle is 14.0 kB gz (target 12): re-exporting all providers keeps it there; subpaths are 6.1–6.7 kB each. Shrinking `.` further means dropping provider re-exports from it, a 2.0 item.
+- Size: `.` is 17.0 kB gz after images and tools and will not meet 12 kB, because its `AIFactory` constructs all five providers when given none (zero config); re-exports were never the cost. `./core` (factory without defaults, 9.6 kB) plus one provider subpath is 11.5 kB, and that is the number the README should quote. The `.` entry's `AIFactory` is a subclass that overrides `defaults()`.
 - Catalog routes `grok-`, `deepseek-chat|reasoner`, Mistral's `-latest`/`-YYMM` ids and Groq's `-versatile|-instant` ids; `vendor/model` ids stay unrouted (OpenRouter, Together, Groq all use them).
 
 Phase 3 → 2.0.0 (breaking): §11 Phase 3 and §4. `messages[]` with images, tool calling with `maxSteps` and leaked `<function=>` recovery (§13.2), `schema` via Standard Schema, typed chunks with `legacyChunks`, `usage` replaces flat fields, `discover: 'lazy'` default, delete `@deprecated` types, drop provider re-exports from `.` if the size gate still matters, `MIGRATION.md`, Bun in CI.

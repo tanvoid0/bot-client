@@ -2,8 +2,8 @@ import { AIFactory, aiFactory, ensureFactoryReady, AIRequest, AIResponse, AIErro
 import { buildChatMessages } from '../src/providers/base-provider.js';
 
 // Mock the singleton so ensureFactoryReady test does not hit the network (avoids timeout and open handles).
-jest.mock('../src/ai-factory.js', () => {
-  const actual = jest.requireActual('../src/ai-factory.js');
+jest.mock('../src/index.js', () => {
+  const actual = jest.requireActual('../src/index.js');
   const mockFactory = {
     ready: () => Promise.resolve(),
     getAvailableProviders: () => ['mock'],

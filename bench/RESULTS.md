@@ -11,7 +11,7 @@ Machine: local dev machine (Windows), single run per script, see command column.
 | Streaming overhead per chunk | < 0.05 ms | raw 17.08 µs/chunk, `processStream` 8.20 µs/chunk (delta −8.88 µs) | yes | `npm run bench:stream` |
 | Memory for a 1 MB streamed answer | flat, far below 1 MB | 299.2 KB heapUsed delta for 1,048,580 chars streamed | yes | `npm run bench:stream -- --size` |
 | Cold `import` of core entry | < 15 ms, zero network | median 9.17 ms over 5 runs (9.08, 9.08, 9.17, 9.47, 9.53); no-network assertion passed | yes | `npm run bench:import` |
-| Published size (`.` entry, minified, gz) | < 12 kB | raw 44,793 B, gz 14,033 B (1.8.0: presets, hooks, `providerOptions`, model cache added; `ollama-cli` removed) | no, 2 kB over; `.` still re-exports every provider, so subpaths are what shrink a consumer's bundle: one provider entry is 6,052–6,729 B gz (`openai-compatible` 6,580 B) | `npm run bench:size` |
+| Published size (minified, gz) | < 12 kB for `./core` + one provider | 2.0 dev (2026-09-13, after images + tools): `.` 17,048 B; `./core` 9,579 B; `./core` + `./openai` bundled together 11,524 B | yes for the split entry; `.` keeps all five built-ins for zero config and is not expected to meet it | `npm run bench:size` |
 
 ## Notes
 

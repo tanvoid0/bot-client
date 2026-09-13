@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Leaked tool calls: text of the form `<function=name>{json}</function>` from a weak local model is recovered as a real call (first occurrence per tool) and stripped from `data`, on OpenAI-format hosts and Ollama, whenever `tools` were offered. `recoverLeakedToolCalls` exported.
 - Ollama's "model does not support tools" 400 classifies as `UNSUPPORTED` with a hint.
 - `core/tools.ts` helpers exported for custom providers: `openaiTools`, `parseArgs`, `runTools`, `nextStepRequest`.
+- `@tanvoid0/bot-client/core`: the factory, errors, types and helpers without the built-in providers. `AIFactory` from `./core` has no default providers (pass `providers`); `./core` plus one provider subpath bundles to 11.5 kB gz, against 17 kB for `.`. The `.` entry is unchanged: its `AIFactory` still defaults to all five providers, and `aiFactory` still works with no config.
 
 ### Changed
 

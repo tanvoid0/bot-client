@@ -3,11 +3,6 @@ import { canRun, nextStepRequest, runTools } from './core/tools.js';
 import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
 import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
 import { guessProvider, splitExplicit } from './core/catalog.js';
-import { OpenAIProvider } from './providers/openai-provider.js';
-import { OllamaProvider } from './providers/ollama-provider.js';
-import { LMStudioProvider } from './providers/lmstudio-provider.js';
-import { AnthropicProvider } from './providers/anthropic-provider.js';
-import { GeminiProvider } from './providers/gemini-provider.js';
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -57,10 +52,13 @@ export class AIFactory {
     return fn?.(ctx);
   }
 
+  /** Providers used when the config names none. Empty here; the `.` entry's subclass supplies the built-ins. */
+  protected defaults(): AIProvider[] {
+    return [];
+  }
+
   private candidates(): AIProvider[] {
-    return this.config.providers !== undefined
-      ? this.config.providers
-      : [new OpenAIProvider(), new AnthropicProvider(), new GeminiProvider(), new OllamaProvider(), new LMStudioProvider()];
+    return this.config.providers ?? this.defaults();
   }
 
   private async initializeProviders(): Promise<void> {
@@ -486,16 +484,4 @@ export class AIFactory {
   ready(): Promise<void> {
     return this.ensureInitialized();
   }
-}
-
-/**
- * Shared factory. Constructing it is free — provider discovery is deferred to
- * the first request — so importing this module touches no network.
- */
-export const aiFactory = new AIFactory();
-
-/** Shared factory, with provider discovery already run. */
-export async function ensureFactoryReady(): Promise<AIFactory> {
-  await aiFactory.ready();
-  return aiFactory;
 }

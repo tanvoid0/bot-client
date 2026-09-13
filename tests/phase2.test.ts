@@ -201,7 +201,7 @@ describe('entry purity', () => {
     execFileSync(process.execPath, [esbuild, entry, '--bundle', '--platform=browser', '--format=esm', '--log-level=error'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
   test('the main entry and every provider subpath bundle for the browser with no node built-ins', () => {
-    for (const entry of ['src/index.ts', 'src/providers/openai-provider.ts', 'src/providers/anthropic-provider.ts', 'src/providers/gemini-provider.ts', 'src/providers/ollama-provider.ts', 'src/providers/lmstudio-provider.ts', 'src/providers/openai-compatible.ts']) {
+    for (const entry of ['src/index.ts', 'src/core.ts', 'src/providers/openai-provider.ts', 'src/providers/anthropic-provider.ts', 'src/providers/gemini-provider.ts', 'src/providers/ollama-provider.ts', 'src/providers/lmstudio-provider.ts', 'src/providers/openai-compatible.ts']) {
       const out = bundle(entry);
       expect(out).not.toMatch(/child_process|["']node:|require\(["']fs["']\)/);
     }
