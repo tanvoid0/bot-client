@@ -138,6 +138,11 @@ jobs:
           exit 1
         fi
         npm publish
+
+    - name: Publish the @tanvoid0/bot-client re-export shim
+      run: |
+        npm run build:shim
+        npm publish ./shim
     
     - name: Create GitHub Release
       if: github.event_name == 'workflow_dispatch'
@@ -146,12 +151,8 @@ jobs:
         tag_name: v${{ steps.pkg.outputs.version }}
         name: Release v${{ steps.pkg.outputs.version }}
         body: |
-          ## What's Changed
-          
-          This release includes the latest updates to the package.
-          
-          ### Version: ${{ steps.pkg.outputs.version }}
-          
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what changed and [MIGRATION.md](https://github.com/${{ github.repository }}/blob/main/MIGRATION.md) when crossing a major.
+
           ### Installation
           ```bash
           npm install ${{ steps.pkg.outputs.name }}
