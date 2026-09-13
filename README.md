@@ -4,8 +4,12 @@
 [![npm version](https://img.shields.io/npm/v/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.1%20kB%20gz-blue)
+![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
 
-Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, plus Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any other OpenAI-compatible API through one `OpenAICompatibleProvider`. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+); the main entry has no Node built-ins, so it runs in Bun, Deno, Workers and browsers too. One request shape for every provider, with **real streaming** on all five, **typed provider errors** (a code and a hint, the provider's own message never rewritten), **retries with backoff**, a **stream idle timeout**, and `finishReason` on every response. Model routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models, API keys and a `doctor` that pings every provider.
+Zero-dependency TypeScript LLM client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, plus Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any other OpenAI-compatible API through one `OpenAICompatibleProvider`. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+); the main entry has no Node built-ins, so it runs in Bun, Deno, Workers and browsers too. One request shape for every provider, with **real streaming** on all five, **tool calling** with an automatic `maxSteps` loop, **structured output** through any Standard Schema (Zod, Valibot, ArkType) or plain JSON Schema, **images** in messages, **typed provider errors** (a code and a hint, the provider's own message never rewritten), **retries with backoff**, a **stream idle timeout**, and `finishReason` on every response. Model routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models, API keys and a `doctor` that pings every provider.
+
+Upgrading from 1.x? Read [MIGRATION.md](MIGRATION.md): every removed input fails with an error naming its replacement.
 
 ---
 
@@ -15,9 +19,10 @@ Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, plus
 npm install @tanvoid0/bot-client
 ```
 
-The main entry exports everything and is edge/browser safe. Subpaths pull in one provider at a time; `ollama-cli` is the only one that needs Node:
+The main entry exports everything and is edge/browser safe. `/core` plus one provider subpath bundles to 12.1 kB gzipped (`npm run bench:size`); `ollama-cli` is the only one that needs Node:
 
 ```typescript
+import { AIFactory } from '@tanvoid0/bot-client/core';               // factory, errors, types; no built-in providers (pass `providers`)
 import { OpenAIProvider } from '@tanvoid0/bot-client/openai';        // also /anthropic /gemini /ollama /lmstudio /openai-compatible
 import { runOllamaCLI } from '@tanvoid0/bot-client/ollama-cli';      // spawns the `ollama` binary (Node only)
 ```
@@ -37,14 +42,14 @@ With **Ollama** running locally, this works without API keys. For cloud provider
 
 ## Streaming
 
-`processStream` yields the answer as it is written, over real SSE (OpenAI, LM Studio, Anthropic, Gemini) or NDJSON (Ollama). Each chunk's `text` is the delta since the previous chunk, so a consumer appends rather than replaces. The last chunk carries `done: true`, `finishReason`, `usage` (when the provider reports it), `durationMs` (wall time for the whole stream) and `timeToFirstTokenMs`.
+`processStream` yields the answer as it is written, over real SSE (OpenAI, LM Studio, Anthropic, Gemini) or NDJSON (Ollama). Chunks are a union discriminated by `type`: `text` (the delta since the previous chunk; append, do not replace), `reasoning` (a thinking model's thoughts, never mixed into the answer), `tool-call` (one completed call) and a final `done` carrying `finishReason`, `usage` (when the provider reports it), `toolCalls`, `durationMs` (wall time for the whole stream) and `timeToFirstTokenMs`.
 
 ```typescript
 import { aiFactory } from '@tanvoid0/bot-client';
 
 for await (const chunk of aiFactory.processStream({ prompt: 'Count to twenty.' })) {
-  process.stdout.write(chunk.text);
-  if (chunk.done) console.log('\n', chunk.finishReason, chunk.usage, `${chunk.durationMs}ms`);
+  if (chunk.type === 'text') process.stdout.write(chunk.text);
+  if (chunk.type === 'done') console.log('\n', chunk.finishReason, chunk.usage, `${chunk.durationMs}ms`);
 }
 ```
 
@@ -58,7 +63,7 @@ setTimeout(() => abort.abort(), 10_000);
 
 try {
   for await (const chunk of aiFactory.processStream({ prompt, signal: abort.signal })) {
-    process.stdout.write(chunk.text);
+    if (chunk.type === 'text') process.stdout.write(chunk.text);
   }
 } catch (err) {
   if (abort.signal.aborted) console.log('cancelled');
@@ -86,14 +91,71 @@ const { fruits } = JSON.parse(res.data!);
 
 ---
 
+## Messages and images
+
+`prompt` is shorthand for a final user turn. `messages` is the whole conversation; a user message may carry image parts as a remote URL, a `data:` URL, raw bytes or base64 (the mime type is sniffed when omitted).
+
+```typescript
+const res = await aiFactory.process({
+  modelId: 'gpt-4o',
+  systemPrompt: 'Answer in one line.',
+  messages: [
+    { role: 'user', content: [{ type: 'text', text: 'What is in this picture?' }, { type: 'image', data: await readFile('cat.png') }] },
+    { role: 'assistant', content: 'A cat on a keyboard.' },
+  ],
+  prompt: 'What colour is it?',
+});
+```
+
+Images go out as OpenAI `image_url`, Anthropic `source`, Gemini `inlineData` / `fileData` and Ollama `images[]`. Ollama takes bytes only: a remote URL there fails `UNSUPPORTED` with a hint.
+
+---
+
+## Tool calling
+
+Define tools with a JSON Schema for the arguments. Without `maxSteps`, the model's calls come back on `toolCalls` and you run them; with `maxSteps > 1` and an `execute` on each tool, the factory runs the calls (in parallel), feeds the results back and asks again, up to `maxSteps` rounds, recording each in `steps`.
+
+```typescript
+const weather = {
+  name: 'get_weather',
+  description: 'Current weather for a city',
+  parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] },
+  execute: async ({ city }) => fetchWeather(city),
+};
+
+const res = await aiFactory.process({ prompt: 'Is it raining in Oslo?', tools: [weather], maxSteps: 3 });
+console.log(res.data);            // "No, it is 21C and clear."
+console.log(res.steps?.[0].toolResults);
+```
+
+`toolChoice` is `'auto'`, `'none'`, `'required'` or `{ name }`; it applies to the first round only, so a forced call cannot loop forever. A tool that throws is reported to the model as `{ error }` rather than failing the request. Streams emit a `{ type: 'tool-call' }` chunk per completed call and one `done` at the end of the last round. Weak local models that print `<function=name>{...}</function>` as text get the call recovered and the markup stripped.
+
+---
+
+## Structured output
+
+`schema` takes a JSON Schema object or any [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, ...). It implies JSON mode, goes out on the wire where the host takes a schema (OpenAI `json_schema`, Gemini `responseSchema`, Ollama `format`; Anthropic gets it in the system prompt), and the answer is parsed and validated onto `object`.
+
+```typescript
+import { z } from 'zod';
+
+const Weather = z.object({ city: z.string(), tempC: z.number() });
+const res = await aiFactory.process({ prompt: 'Weather in Oslo as JSON.', schema: Weather });
+if (res.success) console.log(res.object); // { city: 'Oslo', tempC: 21 }, validated
+```
+
+A non-JSON answer fails `INVALID_JSON`, a validation failure `SCHEMA_MISMATCH` (every issue in `errorInfo.details`), and an answer cut off by `maxTokens` `TRUNCATED`; the raw text stays on `data`. A plain JSON Schema is sent but not validated locally (no validator ships). Streams ignore `schema`.
+
+---
+
 ## Reasoning models
 
-`reasoning: true` lets a thinking model think. The thinking comes back as `reasoning` on the response and as `reasoning` deltas on stream chunks. It is never mixed into `text`.
+`reasoning: true` lets a thinking model think. The thinking comes back as `reasoning` on the response and as `{ type: 'reasoning' }` chunks on a stream. It is never mixed into the answer.
 
 ```typescript
 for await (const chunk of aiFactory.processStream({ prompt: 'Is 91 prime?', modelId: 'gemma4', reasoning: true })) {
-  if (chunk.reasoning) process.stderr.write(chunk.reasoning); // the model's thinking
-  process.stdout.write(chunk.text);                            // the answer
+  if (chunk.type === 'reasoning') process.stderr.write(chunk.text); // the model's thinking
+  if (chunk.type === 'text') process.stdout.write(chunk.text);       // the answer
 }
 ```
 
@@ -473,18 +535,20 @@ Hooks are awaited; `onResponse` gets the `AIResponse`, or the `done` chunk for a
 <details>
 <summary><strong>Types</strong></summary>
 
-- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `jsonMode?`, `responseSchema?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models)), `providerOptions?` (merged last into the wire body)
-- **AIResponse**: `success`, `data?`, `error?`, `errorInfo?` (`AIError`, set when `success` is false), `finishReason` (`'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown'`), `usage?` (`TokenUsage`), `modelUsed?`, `providerId?`, `requestId?`, `durationMs`, `retryCount`, `fallbackUsed`
-- **AIStreamChunk**: `text` (delta), `done?`, `usage?`, `modelUsed?`, `finishReason?` (on the done chunk), `requestId?` (on the done chunk), `durationMs?` (on the done chunk), `timeToFirstTokenMs?` (on the done chunk) `reasoning?` (thinking delta; `text` is empty on such chunks)
+- **AIRequest**: `prompt?` (one of `prompt` / `messages` required), `messages?` (`Message[]`), `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `jsonMode?`, `schema?` (JSON Schema or Standard Schema), `tools?`, `toolChoice?`, `maxSteps?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models)), `providerOptions?` (merged last into the wire body)
+- **Message**: `{ role: 'system', content }` | `{ role: 'user', content: string | (TextPart | ImagePart)[] }` | `{ role: 'assistant', content, toolCalls? }` | `{ role: 'tool', toolCallId, name, content }`
+- **Tool**: `name`, `description?`, `parameters` (JSON Schema), `execute?(args, { signal })`; **ToolCall**: `id`, `name`, `arguments`; **ToolResult**: `toolCallId`, `name`, `result?`, `error?`; **Step**: `text`, `toolCalls`, `toolResults`, `usage?`
+- **AIResponse**: `success`, `data?`, `reasoning?`, `object?` (when `schema` given), `toolCalls?`, `steps?`, `error?`, `errorInfo?` (`AIError`, set when `success` is false), `finishReason` (`'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown'`), `usage?` (`TokenUsage`), `modelUsed?`, `providerId?`, `requestId?`, `durationMs`, `retryCount`, `fallbackUsed`
+- **AIStreamChunk**: `{ type: 'text', text }` | `{ type: 'reasoning', text }` | `{ type: 'tool-call', toolCall }` | `{ type: 'done', finishReason, usage?, toolCalls?, requestId?, durationMs?, timeToFirstTokenMs? }`; every member has `modelUsed?`
 - **TokenUsage**: `promptTokens?`, `completionTokens?`, `totalTokens?`, `cachedTokens?`
-- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'eager' | 'lazy' | 'none'`), `timeout?`, `streamIdleTimeout?`, `hooks?` (`{ onRequest?, onResponse?, onError? }`)
+- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'lazy' | 'eager' | 'none'`, default `'lazy'`), `timeout?`, `streamIdleTimeout?`, `hooks?` (`{ onRequest?, onResponse?, onError? }`)
 - **BaseProviderConfig**: accepted by every built-in provider constructor: `baseURL?`, `headers?`, `timeout?`, `streamIdleTimeout?`, `models?` (seeds the supported list, skips discovery), `modelCacheTtlMs?` (default 300000), `fetch?` (custom `fetch`, for proxies or tests)
 - **OpenAICompatibleProvider config**: `BaseProviderConfig` plus `preset?` (`'groq' | 'openrouter' | 'deepseek' | 'mistral' | 'xai' | 'together' | 'agent-platform'`), `id?`, `name?`, `apiKey?`, `modelFilter?`, `defaultModel?`, `defaultMaxTokens?`, `requireApiKey?`, `streamUsage?`, `apiKeyEnv?`
 - **OllamaProvider config**: `BaseProviderConfig` plus `cli?` (`runOllamaCLI` from `/ollama-cli`), `ollamaExecutablePath?`, `preferCLI?`
 - **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
 - **AIError**: see [Errors](#errors)
 - **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`; `processStream` is optional (the factory falls back to one chunk from `process`)
-- Deprecated, removed in 2.0: `AIResponse.confidence`, `.processingTime` (use `.durationMs`), `.cost`, `.modelCapabilities`, `.suggestedImprovements`, `.timestamp`
+- Removed in 2.0 (see [MIGRATION.md](MIGRATION.md)): `history`, `responseSchema`, `usageContext`; `tokensUsed` / `promptTokens` / `completionTokens` (use `usage`), `processingTime`, `confidence`, `cost`, `modelCapabilities`, `suggestedImprovements`, `timestamp`; the 1.x `{ text, done }` chunk shape
 </details>
 
 ---
@@ -510,8 +574,8 @@ A mutex is a synchronization primitive used to ensure that only one thread can a
 
 ```typescript
 for await (const chunk of aiFactory.processStream({ prompt: 'Count from 1 to 5, comma separated.', modelId: 'gemma4:latest' })) {
-  process.stdout.write(chunk.text);
-  if (chunk.done) console.log(chunk);
+  if (chunk.type === 'text') process.stdout.write(chunk.text);
+  if (chunk.type === 'done') console.log(chunk);
 }
 ```
 
@@ -540,7 +604,7 @@ console.log(res.data, JSON.parse(res.data));
 
 ```typescript
 for await (const chunk of aiFactory.processStream({ prompt: 'Is 91 prime? Answer yes or no with one reason.', modelId: 'gemma4:latest', reasoning: true })) {
-  if (chunk.reasoning) thought += chunk.reasoning; else answer += chunk.text;
+  if (chunk.type === 'reasoning') thought += chunk.text; else if (chunk.type === 'text') answer += chunk.text;
 }
 ```
 
@@ -629,7 +693,7 @@ const res = await factory.process({ prompt: 'Say "fallback works" and nothing el
 ```typescript
 const abort = new AbortController();
 for await (const chunk of aiFactory.processStream({ prompt: 'Write a long paragraph.', modelId: 'gemma4:latest', signal: abort.signal })) {
-  partial += chunk.text;
+  if (chunk.type === 'text') partial += chunk.text;
   if (partial.length > 40) abort.abort();
 }
 // throws: { code: 'ABORTED', message: 'This operation was aborted' }   partial has 42 chars
@@ -647,15 +711,15 @@ retryCount: 2
 
 ## Providers
 
-| Provider | Type | Streams | JSON mode | `baseURL` | Notes |
-|---------|------|:-:|:-:|:-:|--------|
-| **Ollama** | Local | ✅ | ✅ | ✅ | API + CLI; list/pull/rm/show/ps/run; tested |
-| **LM Studio** | Local | ✅ | ✅ | ✅ | localhost:1234; OpenAI-compatible; tested |
-| **OpenAI** | Cloud | ✅ | ✅ | ✅ | API key required |
-| **Anthropic** | Cloud | ✅ | ✅ (system-prompt instruction, not native) | ✅ | API key required |
-| **Gemini** | Cloud | ✅ | ✅ + `responseSchema` | ✅ | API key required; tested |
-| **Groq**, **OpenRouter**, **DeepSeek**, **Mistral**, **xAI**, **Together** | Cloud | ✅ | ✅ | ✅ | `OpenAICompatibleProvider` presets; API key required |
-| Any OpenAI-compatible server (vLLM, llama.cpp, ...) | Either | ✅ | ✅ | ✅ | `new OpenAICompatibleProvider({ id, baseURL })` |
+| Provider | Type | Streams | Tools | Schema | Images | `baseURL` | Notes |
+|---------|------|:-:|:-:|:-:|:-:|:-:|--------|
+| **Ollama** | Local | ✅ | ✅ | ✅ `format` | ✅ bytes only | ✅ | API + CLI; list/pull/rm/show/ps/run; tested |
+| **LM Studio** | Local | ✅ | ✅ | ✅ | ✅ | ✅ | localhost:1234; OpenAI-compatible; tested |
+| **OpenAI** | Cloud | ✅ | ✅ | ✅ `json_schema` | ✅ | ✅ | API key required |
+| **Anthropic** | Cloud | ✅ | ✅ | system-prompt instruction, not native | ✅ | ✅ | API key required |
+| **Gemini** | Cloud | ✅ | ✅ | ✅ `responseSchema` | ✅ | ✅ | API key required; tested |
+| **Groq**, **OpenRouter**, **DeepSeek**, **Mistral**, **xAI**, **Together** | Cloud | ✅ | ✅ | host-dependent | host-dependent | ✅ | `OpenAICompatibleProvider` presets; API key required |
+| Any OpenAI-compatible server (vLLM, llama.cpp, ...) | Either | ✅ | ✅ | host-dependent | host-dependent | ✅ | `new OpenAICompatibleProvider({ id, baseURL })` |
 
 Every provider streams for real: SSE for the OpenAI dialect, Anthropic and Gemini; NDJSON for Ollama.
 

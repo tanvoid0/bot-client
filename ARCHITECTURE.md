@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1 and 2 shipped (1.7.0, 1.8.0, both 2026-09-13). Phase 3 is next.
+Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 (docs/SEO, §1.1 comparison column) then release 2.0.0.
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
@@ -685,14 +685,14 @@ Tick when the README reflects reality. Do not tick early; the README is the prod
 - [x] Ollama CLI helper: import path changed to `/ollama-cli`
 
 **After Phase 3 (2.0)**
-- [ ] Quick start uses `messages` where it helps; `prompt` shorthand still first
-- [ ] New sections: "Tool calling" (define, auto-execute with `maxSteps`, manual), "Structured output" (Zod example via Standard Schema, plain JSON Schema example, `object` on response), "Images"
-- [ ] Streaming section: typed chunks; `legacyChunks` note
-- [ ] Types block regenerated from `src/types`; remove every deleted type
-- [ ] Providers table: Tools, Schema, Images columns
+- [x] Quick start keeps `prompt`; `messages` shown in its own section
+- [x] New sections: "Messages and images", "Tool calling", "Structured output"
+- [x] Streaming section: typed chunks (no legacy flag exists)
+- [x] Types block updated; removed list points at MIGRATION.md
+- [x] Providers table: Tools, Schema, Images columns
 - [ ] Comparison table (§1.1) with 2.0 column filled and dated
-- [ ] Link to `MIGRATION.md`; breaking list in CHANGELOG
-- [ ] Badges: bundle size (measured), "runs on Node · Bun · Deno · Workers"
+- [x] Link to `MIGRATION.md`; breaking list in CHANGELOG
+- [x] Badges: bundle size (12.1 kB, `./core` + one provider), runtimes
 
 **After Phase 4**
 - [ ] First sentence contains: zero-dependency, TypeScript, LLM client, the provider names, streaming, tool calling
