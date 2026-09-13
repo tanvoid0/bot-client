@@ -625,11 +625,11 @@ if a 2.0 is not ready.
 - [x] Tool calling on OpenAI-compatible, Anthropic, Gemini, Ollama; `maxSteps` loop in `core/tools.ts` (2026-09-13). Deviations: `tool` messages carry `name` (Gemini and Ollama key results by name, not id); leaked `<function=>` recovery is on whenever `tools` are offered, no flag, one-shot only (a stream has already shown the text); no `capabilities()` probe yet, Ollama's own 400 maps to `UNSUPPORTED`. Stream loop yields intermediate calls as `{ text: '', toolCalls }` until typed chunks land. `.` is 17.1 kB gz after this; dropping provider re-exports from `.` is now due.
 - [x] `schema` via Standard Schema / JSON Schema; `object` on response; `SCHEMA_MISMATCH` / `INVALID_JSON` (2026-09-13). `object` is `unknown`, not inferred from the schema's output type; a plain JSON Schema is sent but not validated locally (no validator, zero deps); streams ignore `schema`. `./core` + `./openai` is 12,058 B gz after this.
 - [x] Typed stream chunks (2026-09-13). Clean union, no `legacyChunks` flag and no 1.x fields: a 1.x-shaped chunk from a custom provider throws `INVALID_RESPONSE` with a hint. `tool-call` chunks per completed call before `done`.
-- [ ] `discover` default flips to `'lazy'`
+- [x] `discover` default flips to `'lazy'` (2026-09-13)
 - [x] Reasoning/thinking chunks: shipped in 1.7.0 as `reasoning` deltas; now `{ type: 'reasoning' }` chunks.
 - [x] `usage` object replaces flat token fields; remove dead types (D11) (2026-09-13; `history` / `responseSchema` / `usageContext` removed too, each failing `INVALID_REQUEST` with a hint rather than being ignored)
 - [x] `MIGRATION.md` 1.x → 2.0 (2026-09-13; the runtime hints point at it)
-- [ ] Bun in CI; web-runtime test
+- [x] Bun in CI; web-runtime test (2026-09-13: `scripts/smoke.mjs` runs the built package through an injected `fetch` on Node and Bun; the browser-bundle purity test in `tests/phase2.test.ts` is the web-runtime gate)
 
 ### Phase 4 — docs and SEO (with 2.0.0 release)
 

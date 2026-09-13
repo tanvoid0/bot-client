@@ -122,7 +122,7 @@ describe('AIFactory', () => {
       discoverModels: jest.fn().mockResolvedValue(['stub-1']),
     };
 
-    const factory = new AIFactory({ providers: [provider] });
+    const factory = new AIFactory({ providers: [provider], discover: 'eager' });
     expect(provider.discoverModels).not.toHaveBeenCalled();
     expect(provider.testConnection).not.toHaveBeenCalled();
 
@@ -141,7 +141,7 @@ describe('AIFactory', () => {
       discoverModels: jest.fn().mockResolvedValue(['stub-1']),
     };
 
-    const factory = new AIFactory({ providers: [provider] });
+    const factory = new AIFactory({ providers: [provider], discover: 'eager' });
     await Promise.all([factory.generate('a'), factory.generate('b')]);
 
     expect(provider.discoverModels).toHaveBeenCalledTimes(1);

@@ -367,6 +367,7 @@ describe('Bot Client Unit Tests', () => {
       };
       const factory = new AIFactory({
         providers: [failingProvider],
+        discover: 'eager',
         logger: { info, warn }
       });
       await factory.ready();

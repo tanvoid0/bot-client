@@ -193,7 +193,7 @@ describe('routing', () => {
     const openai = makeProvider('openai', { testConnection: async () => false });
     const otherProcess = jest.fn().mockResolvedValue({ success: true, data: 'ok', providerId: 'other' });
     const other = makeProvider('other', { supportedModels: [], isModelSupported: () => false, process: otherProcess });
-    const factory = new AIFactory({ providers: [openai, other] }); // discover: 'eager' default
+    const factory = new AIFactory({ providers: [openai, other], discover: 'eager' });
     const res = await factory.process({ prompt: 'hi', modelId: 'gpt-4o' });
     expect(res.success).toBe(false);
     expect(res.errorInfo?.code).toBe('NO_PROVIDERS');

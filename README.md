@@ -354,8 +354,8 @@ const factory = new AIFactory({
 
 `discover` controls when a provider's model list is fetched, and never sends a paid generation to do it:
 
-- `'eager'` (default): every candidate provider is probed in parallel on first use; only those that answer are kept. Probing lists models (`GET /models` or equivalent), so init costs one cheap call per provider, not a completion.
-- `'lazy'`: every candidate provider is registered up front; a provider is probed only the first time a request resolves to it.
+- `'lazy'` (default): every candidate provider is registered up front; a provider is probed only the first time a request resolves to it. Nothing is called until the first request.
+- `'eager'`: every candidate provider is probed in parallel on first use; only those that answer are kept. Probing lists models (`GET /models` or equivalent), so init costs one cheap call per provider, not a completion.
 - `'none'`: never probes; routing relies on `modelId` (explicit prefix or the static catalog) and any `models` seeded in the provider's config.
 
 ```typescript
@@ -659,7 +659,7 @@ retryCount: 2
 
 Every provider streams for real: SSE for the OpenAI dialect, Anthropic and Gemini; NDJSON for Ollama.
 
-The factory probes providers per `discover` (default `'eager'`, see [Discovery](#discovery)) and keeps those that pass the connection check. Use `getProvider('ollama')` (etc.) to use a specific one.
+The factory probes providers per `discover` (default `'lazy'`, see [Discovery](#discovery)) and keeps those that pass the connection check. Use `getProvider('ollama')` (etc.) to use a specific one.
 
 ---
 

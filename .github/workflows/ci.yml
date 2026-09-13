@@ -47,6 +47,23 @@ jobs:
     - name: Run linting
       run: npm run lint
 
+    - name: Smoke test the built package on Node
+      run: node scripts/smoke.mjs
+
+  bun:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    - uses: oven-sh/setup-bun@v2
+    - run: npm ci
+    - run: npm run build
+    - name: Smoke test the built package on Bun
+      run: bun scripts/smoke.mjs
+
   security:
     runs-on: ubuntu-latest
     steps:

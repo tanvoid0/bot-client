@@ -31,7 +31,7 @@ export class AIFactory {
       ...this.config.retry,
       ...(this.config.retries !== undefined && { retries: this.config.retries }),
     };
-    this.discover = this.config.discover ?? 'eager';
+    this.discover = this.config.discover ?? 'lazy';
   }
 
   /**

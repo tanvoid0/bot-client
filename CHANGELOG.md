@@ -24,6 +24,7 @@ Breaking. See [MIGRATION.md](MIGRATION.md); every removed input fails with an `A
 
 ### Changed
 
+- `discover` defaults to `'lazy'`: providers are registered without a network call and probed the first time a request lands on them. Pass `discover: 'eager'` for the 1.x behaviour of probing every provider up front and dropping the ones that fail.
 - `AIRequest.prompt` is optional (`string | undefined`); a custom provider reading it as a string needs a `?? ''`. `buildChatMessages` returns `Message[]`, whose `content` may be a parts array.
 
 ### Removed
