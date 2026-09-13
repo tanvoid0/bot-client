@@ -9,7 +9,7 @@ npm run build && npm test && npm run lint
 
 All three must pass before a PR. `npm test` runs against stubbed `fetch`; nothing needs a key or a running server. `npm run bench:size` prints the gzipped size of every entry; `./core` plus one provider stays under 12.5 kB, and a PR that moves it says so.
 
-Optional, against real services: `npm run test:integration` (local Ollama / LM Studio) and `npx bot-client doctor` (every provider you have a key for).
+Optional, against real services: `npm run test:integration` (local Ollama / LM Studio) and `npx llmwire doctor` (every provider you have a key for).
 
 ## Rules
 
@@ -29,7 +29,7 @@ Most hosts do. Add a row to `PRESETS` in [src/providers/openai-compatible.ts](sr
 myhost: { name: 'MyHost', baseURL: 'https://api.myhost.ai/v1', apiKeyEnv: ['MYHOST_API_KEY'] },
 ```
 
-Fields worth knowing: `streamUsage: false` when the host rejects `stream_options`, `modelFilter` when `/models` lists things that cannot chat. If the host's model ids have a unique prefix (`grok-`), add a route in [src/core/catalog.ts](src/core/catalog.ts) so `modelId` reaches it with no discovery call; `vendor/model` ids stay unrouted because several hosts share them. Then: a README row in the Providers table, a preset test in `tests/phase2.test.ts`, and run `npx bot-client doctor myhost` once with a real key.
+Fields worth knowing: `streamUsage: false` when the host rejects `stream_options`, `modelFilter` when `/models` lists things that cannot chat. If the host's model ids have a unique prefix (`grok-`), add a route in [src/core/catalog.ts](src/core/catalog.ts) so `modelId` reaches it with no discovery call; `vendor/model` ids stay unrouted because several hosts share them. Then: a README row in the Providers table, a preset test in `tests/phase2.test.ts`, and run `npx llmwire doctor myhost` once with a real key.
 
 ### Speaks its own dialect
 
@@ -103,4 +103,4 @@ Tests, all with `jest.spyOn(globalThis, 'fetch')` (see `tests/providers-stream.t
 
 ## Releasing
 
-Maintainer only: `npm run publish:minor` (or `patch` / `major`) bumps, builds, runs unit tests and publishes; `publish:dry` rehearses.
+Maintainer only: `npm run publish:minor` (or `patch` / `major`) bumps, builds, runs unit tests and publishes `llmwire`; `publish:dry` rehearses. Then `npm run build:shim && npm publish ./shim` publishes the `@tanvoid0/bot-client` re-export shim at the same version.

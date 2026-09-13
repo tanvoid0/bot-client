@@ -5,6 +5,14 @@ library fails loudly with an `AIError` whose `hint` names the replacement, so an
 upgrade cannot go unnoticed at runtime; where a removed output is read, TypeScript
 reports the missing property.
 
+## Package name
+
+The package is now `llmwire`. `@tanvoid0/bot-client` 2.x is a shim that depends on
+`llmwire` and re-exports every entry (`@tanvoid0/bot-client/openai` → `llmwire/openai`)
+plus the `bot-client` CLI, so an existing install keeps working; it is kept for one major.
+To switch: `npm rm @tanvoid0/bot-client && npm i llmwire`, then replace the import path.
+The CLI is `npx llmwire`.
+
 ## Requests
 
 | 1.x | 2.0 | What happens if you keep the old one |

@@ -104,3 +104,6 @@ jspm_packages/
 
 # Generated API docs (deployed by .github/workflows/docs.yml)
 docs/
+
+# Generated re-export shim (scripts/build-shim.mjs)
+shim/

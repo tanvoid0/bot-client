@@ -1,13 +1,13 @@
-# @tanvoid0/bot-client
+# llmwire
 
 > Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, Ollama, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API. One request shape with real streaming, tool calling (`maxSteps` loop), structured output (Standard Schema or JSON Schema), images and typed provider errors (`AIError` with `code`, `retryable`, `hint`). Native `fetch`; runs on Node 18+, Bun, Deno, Workers and browsers.
 
-Install: `npm install @tanvoid0/bot-client`. Entries: `.` (factory with all providers), `./core` (factory without providers, 9.6 kB gz), `./openai`, `./anthropic`, `./gemini`, `./ollama`, `./lmstudio`, `./openai-compatible`, `./ollama-cli` (Node only).
+Install: `npm install llmwire`. Entries: `.` (factory with all providers), `./core` (factory without providers, 9.6 kB gz), `./openai`, `./anthropic`, `./gemini`, `./ollama`, `./lmstudio`, `./openai-compatible`, `./ollama-cli` (Node only).
 
 Minimal use:
 
 ```ts
-import { aiFactory } from '@tanvoid0/bot-client';
+import { aiFactory } from 'llmwire';
 const res = await aiFactory.process({ prompt: 'Hello', modelId: 'gpt-4o' });
 if (!res.success) console.error(res.errorInfo?.code, res.errorInfo?.hint);
 for await (const c of aiFactory.processStream({ prompt: 'Hi' })) if (c.type === 'text') process.stdout.write(c.text);
@@ -15,20 +15,20 @@ for await (const c of aiFactory.processStream({ prompt: 'Hi' })) if (c.type === 
 
 ## Docs
 
-- [README](https://github.com/tanvoid0/bot-client/blob/main/README.md): install, quick start, streaming, messages and images, tool calling, structured output, errors, retries, performance, comparison, CLI, customisation, types
-- [MIGRATION.md](https://github.com/tanvoid0/bot-client/blob/main/MIGRATION.md): 1.x to 2.0, every removed field and its replacement
-- [CHANGELOG.md](https://github.com/tanvoid0/bot-client/blob/main/CHANGELOG.md)
-- [ARCHITECTURE.md](https://github.com/tanvoid0/bot-client/blob/main/ARCHITECTURE.md): design decisions, error classification table, roadmap
-- [CONTRIBUTING.md](https://github.com/tanvoid0/bot-client/blob/main/CONTRIBUTING.md): gates to run, provider template
+- [README](https://github.com/tanvoid0/llmwire/blob/main/README.md): install, quick start, streaming, messages and images, tool calling, structured output, errors, retries, performance, comparison, CLI, customisation, types
+- [MIGRATION.md](https://github.com/tanvoid0/llmwire/blob/main/MIGRATION.md): 1.x to 2.0, every removed field and its replacement
+- [CHANGELOG.md](https://github.com/tanvoid0/llmwire/blob/main/CHANGELOG.md)
+- [ARCHITECTURE.md](https://github.com/tanvoid0/llmwire/blob/main/ARCHITECTURE.md): design decisions, error classification table, roadmap
+- [CONTRIBUTING.md](https://github.com/tanvoid0/llmwire/blob/main/CONTRIBUTING.md): gates to run, provider template
 
 ## Source
 
-- [src/types/index.ts](https://github.com/tanvoid0/bot-client/blob/main/src/types/index.ts): `AIRequest`, `AIResponse`, `Message`, `Tool`, `AIStreamChunk`, `BaseProviderConfig`
-- [src/core/errors.ts](https://github.com/tanvoid0/bot-client/blob/main/src/core/errors.ts): `AIError`, `AIErrorCode`, classification
-- [src/ai-factory.ts](https://github.com/tanvoid0/bot-client/blob/main/src/ai-factory.ts): routing, retries, fallback, tool loop, schema validation
-- [src/providers/](https://github.com/tanvoid0/bot-client/blob/main/src/providers): one file per provider; `openai-compatible.ts` holds the `PRESETS` table
+- [src/types/index.ts](https://github.com/tanvoid0/llmwire/blob/main/src/types/index.ts): `AIRequest`, `AIResponse`, `Message`, `Tool`, `AIStreamChunk`, `BaseProviderConfig`
+- [src/core/errors.ts](https://github.com/tanvoid0/llmwire/blob/main/src/core/errors.ts): `AIError`, `AIErrorCode`, classification
+- [src/ai-factory.ts](https://github.com/tanvoid0/llmwire/blob/main/src/ai-factory.ts): routing, retries, fallback, tool loop, schema validation
+- [src/providers/](https://github.com/tanvoid0/llmwire/blob/main/src/providers): one file per provider; `openai-compatible.ts` holds the `PRESETS` table
 
 ## Optional
 
-- [examples/](https://github.com/tanvoid0/bot-client/tree/main/examples): runnable scripts
-- [bench/RESULTS.md](https://github.com/tanvoid0/bot-client/blob/main/bench/RESULTS.md): overhead, streaming, import and size numbers with method
+- [examples/](https://github.com/tanvoid0/llmwire/tree/main/examples): runnable scripts
+- [bench/RESULTS.md](https://github.com/tanvoid0/llmwire/blob/main/bench/RESULTS.md): overhead, streaming, import and size numbers with method

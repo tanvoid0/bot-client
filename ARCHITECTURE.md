@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 done except the unscoped-name decision (owner's call); then release 2.0.0.
+Status: Phases 1–3 done (1.7.0, 1.8.0, and 2.0.0 unreleased on main, all 2026-09-13). Phase 4 done; next is the 2.0.0 release (`llmwire` first, then the `@tanvoid0/bot-client` shim).
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
@@ -637,7 +637,7 @@ if a 2.0 is not ready.
 - [x] package.json metadata per §10.1; `llms.txt` (2026-09-13; `MIGRATION.md` and `llms.txt` added to `files`). GitHub topics: set in the repo settings by hand, not tracked here
 - [x] Docs site from typedoc on GitHub Pages (`.github/workflows/docs.yml`, `typedoc.json`); `homepage` updated (2026-09-13)
 - [x] `CONTRIBUTING.md` with provider template (2026-09-13)
-- [ ] Decide on unscoped name (2026-09-13 check: `botclient` and `any-llm` taken; `llm-client` and `anyllm` free on npm)
+- [x] Unscoped name: `llmwire` (2026-09-13). npm rejects names that collide after stripping punctuation, which ruled out `llm-client` (`llmclient`), `anyllm` (`any-llm`), `omnillm` (`omni-llm`), `multillm` (`multi-llm`); `llmwire` / `llm-wire` were both free; one wire format for every provider. `@tanvoid0/bot-client` becomes a generated re-export shim (`scripts/build-shim.mjs` → `shim/`, published separately at the same version) for one major.
 
 ### Phase 5 — agent layer (2.1.0, additive)
 

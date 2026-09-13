@@ -1,22 +1,22 @@
-# Bot Client
+# llmwire
 
-[![CI/CD Pipeline](https://github.com/tanvoid0/bot-client/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/tanvoid0/bot-client/actions)
-[![npm version](https://img.shields.io/npm/v/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
-[![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
+[![CI/CD Pipeline](https://github.com/tanvoid0/llmwire/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/tanvoid0/llmwire/actions)
+[![npm version](https://img.shields.io/npm/v/llmwire.svg)](https://www.npmjs.com/package/llmwire)
+[![npm downloads](https://img.shields.io/npm/dm/llmwire.svg)](https://www.npmjs.com/package/llmwire)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.1%20kB%20gz-blue)
 ![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
-[![API docs](https://img.shields.io/badge/API%20docs-typedoc-blue)](https://tanvoid0.github.io/bot-client/)
+[![API docs](https://img.shields.io/badge/API%20docs-typedoc-blue)](https://tanvoid0.github.io/llmwire/)
 
 Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them.
 
-## Why bot-client
+## Why llmwire
 
 - **Zero runtime dependencies.** Native `fetch`, no Node built-ins in the main entry: Node 18+, Bun, Deno, Workers, browsers. `/core` plus one provider bundles to 12.1 kB gzipped.
 - **Local first, cloud with one env var.** Ollama and LM Studio work with no config; `OPENAI_API_KEY` (and friends) switches on cloud. Routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins.
 - **One request shape, every capability.** `messages` with images, `tools` with an automatic `maxSteps` loop, `schema` through any Standard Schema (Zod, Valibot, ArkType) or plain JSON Schema, typed stream chunks, `finishReason` and `usage` on every answer.
 - **Honest errors.** Every failure is an `AIError` with a `code`, the provider's own message never rewritten, and a `hint` saying what to do next. Retries with backoff only on what is retryable; fallback across providers; a stream idle timeout.
-- **Batteries for local models.** Ollama pull/list/rm/show/ps/run from the library or `npx @tanvoid0/bot-client`, plus a `doctor` that pings every provider.
+- **Batteries for local models.** Ollama pull/list/rm/show/ps/run from the library or `npx llmwire`, plus a `doctor` that pings every provider.
 
 Upgrading from 1.x? Read [MIGRATION.md](MIGRATION.md): every removed input fails with an error naming its replacement.
 
@@ -25,21 +25,21 @@ Upgrading from 1.x? Read [MIGRATION.md](MIGRATION.md): every removed input fails
 ## Install
 
 ```bash
-npm install @tanvoid0/bot-client
+npm install llmwire
 ```
 
 The main entry exports everything and is edge/browser safe. `/core` plus one provider subpath bundles to 12.1 kB gzipped (`npm run bench:size`); `ollama-cli` is the only one that needs Node:
 
 ```typescript
-import { AIFactory } from '@tanvoid0/bot-client/core';               // factory, errors, types; no built-in providers (pass `providers`)
-import { OpenAIProvider } from '@tanvoid0/bot-client/openai';        // also /anthropic /gemini /ollama /lmstudio /openai-compatible
-import { runOllamaCLI } from '@tanvoid0/bot-client/ollama-cli';      // spawns the `ollama` binary (Node only)
+import { AIFactory } from 'llmwire/core';               // factory, errors, types; no built-in providers (pass `providers`)
+import { OpenAIProvider } from 'llmwire/openai';        // also /anthropic /gemini /ollama /lmstudio /openai-compatible
+import { runOllamaCLI } from 'llmwire/ollama-cli';      // spawns the `ollama` binary (Node only)
 ```
 
 ## Quick start
 
 ```typescript
-import { aiFactory } from '@tanvoid0/bot-client';
+import { aiFactory } from 'llmwire';
 
 const text = await aiFactory.generate('Say hello in one sentence.', { maxTokens: 100 });
 console.log(text);
@@ -54,7 +54,7 @@ With **Ollama** running locally, this works without API keys. For cloud provider
 `processStream` yields the answer as it is written, over real SSE (OpenAI, LM Studio, Anthropic, Gemini) or NDJSON (Ollama). Chunks are a union discriminated by `type`: `text` (the delta since the previous chunk; append, do not replace), `reasoning` (a thinking model's thoughts, never mixed into the answer), `tool-call` (one completed call) and a final `done` carrying `finishReason`, `usage` (when the provider reports it), `toolCalls`, `durationMs` (wall time for the whole stream) and `timeToFirstTokenMs`.
 
 ```typescript
-import { aiFactory } from '@tanvoid0/bot-client';
+import { aiFactory } from 'llmwire';
 
 for await (const chunk of aiFactory.processStream({ prompt: 'Count to twenty.' })) {
   if (chunk.type === 'text') process.stdout.write(chunk.text);
@@ -287,7 +287,7 @@ Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock se
 
 Snapshot taken 2026-09-13 from each project's public docs; corrections welcome as issues.
 
-| | Vercel AI SDK 6 | token.js | multi-llm-ts 5 | llm.js | **bot-client 2.0** |
+| | Vercel AI SDK 6 | token.js | multi-llm-ts 5 | llm.js | **llmwire 2.0** |
 |---|---|---|---|---|---|
 | Providers | ~30 via packages | 200+ (OpenAI format) | ~20 | ~10 | 5 built in, 6 presets, any OpenAI-compatible host |
 | Runtime deps | many (zod, ai-core, per-provider pkgs) | some | some | some | **0** |
@@ -312,12 +312,12 @@ Snapshot taken 2026-09-13 from each project's public docs; corrections welcome a
 Manage Ollama models and API keys from the terminal, and check every provider at once:
 
 ```bash
-npx @tanvoid0/bot-client help
-npx @tanvoid0/bot-client doctor
-npx @tanvoid0/bot-client ollama list
-npx @tanvoid0/bot-client ollama pull llama3.1:8b
-npx @tanvoid0/bot-client keys list
-npx @tanvoid0/bot-client keys set BOT_CLIENT_OPENAI_KEY sk-...
+npx llmwire help
+npx llmwire doctor
+npx llmwire ollama list
+npx llmwire ollama pull llama3.1:8b
+npx llmwire keys list
+npx llmwire keys set BOT_CLIENT_OPENAI_KEY sk-...
 ```
 
 <details>
@@ -326,7 +326,7 @@ npx @tanvoid0/bot-client keys set BOT_CLIENT_OPENAI_KEY sk-...
 Lists each provider's models, sends it a one-line prompt (`maxTokens: 16`), and prints the model that answered or the classified error with its hint. Name a preset to include it (`doctor groq openrouter`). Exit code 0 when at least one provider answered.
 
 ```
-$ npx @tanvoid0/bot-client doctor
+$ npx llmwire doctor
 openai       FAIL  NO_API_KEY                   OpenAI API key required — Pass { apiKey } to the OpenAI provider or set its environment variable. (24 ms)
 anthropic    FAIL  NO_API_KEY                   Anthropic API key required — Pass { apiKey } to the Anthropic provider or set its environment variable. (24 ms)
 gemini       FAIL  NO_API_KEY                   Gemini API key required — Pass { apiKey } to the Google Gemini provider or set its environment variable. (24 ms)
@@ -414,7 +414,7 @@ Local providers (Ollama, LM Studio) need no keys; ensure the app is running on i
 Create a factory with default provider, fallback, order, logger, or custom providers:
 
 ```typescript
-import { AIFactory } from '@tanvoid0/bot-client';
+import { AIFactory } from 'llmwire';
 
 const factory = new AIFactory({
   defaultProvider: 'ollama',
@@ -430,7 +430,7 @@ const text = await factory.generate('Hello');
 Use only specific providers (e.g. custom or pre-configured):
 
 ```typescript
-import { AIFactory, OllamaProvider, OpenAIProvider } from '@tanvoid0/bot-client';
+import { AIFactory, OllamaProvider, OpenAIProvider } from 'llmwire';
 
 const factory = new AIFactory({
   providers: [
@@ -464,7 +464,7 @@ const factory = new AIFactory({ discover: 'lazy' });
 Point `OpenAICompatibleProvider` at any server that speaks the OpenAI chat-completions dialect. Six hosts ship as presets that fill in the origin and the key variable:
 
 ```typescript
-import { AIFactory, OpenAICompatibleProvider } from '@tanvoid0/bot-client';
+import { AIFactory, OpenAICompatibleProvider } from 'llmwire';
 
 const groq = new OpenAICompatibleProvider({ preset: 'groq' });               // reads GROQ_API_KEY
 const vllm = new OpenAICompatibleProvider({ id: 'vllm', baseURL: 'http://gpu-box:8000' });
@@ -490,8 +490,8 @@ Any field given alongside `preset` overrides it (`{ preset: 'groq', apiKey, base
 Use the Ollama provider for API-first operations. Pass `cli: runOllamaCLI` to fall back to the `ollama` binary when the server is down (and for `serve`, `stop`, `create`, which are CLI-only); it comes from the Node-only `ollama-cli` subpath so the main entry stays free of `child_process`:
 
 ```typescript
-import { AIFactory, OllamaProvider } from '@tanvoid0/bot-client';
-import { runOllamaCLI } from '@tanvoid0/bot-client/ollama-cli';
+import { AIFactory, OllamaProvider } from 'llmwire';
+import { runOllamaCLI } from 'llmwire/ollama-cli';
 
 const factory = new AIFactory({ providers: [new OllamaProvider({ cli: runOllamaCLI })] });
 const ollama = factory.getProvider('ollama') as OllamaProvider | null;
@@ -520,7 +520,7 @@ await provider.pull('gemma3');
 <summary><strong>Standalone Ollama CLI helper</strong></summary>
 
 ```typescript
-import { runOllamaCLI, isOllamaCLIAvailable } from '@tanvoid0/bot-client/ollama-cli';
+import { runOllamaCLI, isOllamaCLIAvailable } from 'llmwire/ollama-cli';
 
 const ok = await isOllamaCLIAvailable();
 const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => process.stderr.write(c) });
@@ -534,7 +534,7 @@ const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => pr
 Every built-in provider takes `BaseProviderConfig`; the factory adds hooks and defaults on top.
 
 ```typescript
-import { AIFactory, AnthropicProvider, OllamaProvider } from '@tanvoid0/bot-client';
+import { AIFactory, AnthropicProvider, OllamaProvider } from 'llmwire';
 
 const anthropic = new AnthropicProvider({
   baseURL: 'https://my-gateway.example.com',      // any origin that speaks the Messages API
@@ -783,7 +783,7 @@ if (provider) {
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the gates to run and a template for adding a provider. [examples/](examples) has runnable scripts; the generated [API reference](https://tanvoid0.github.io/bot-client/) lists every exported symbol; [llms.txt](llms.txt) is the index for coding agents.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the gates to run and a template for adding a provider. [examples/](examples) has runnable scripts; the generated [API reference](https://tanvoid0.github.io/llmwire/) lists every exported symbol; [llms.txt](llms.txt) is the index for coding agents.
 
 ---
 

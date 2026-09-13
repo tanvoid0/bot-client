@@ -31,7 +31,7 @@ Add any other context about the problem here.
 
 **Code example**
 ```typescript
-import { aiFactory } from '@tanvoid0/bot-client';
+import { aiFactory } from 'llmwire';
 
 // Your code here
 ```

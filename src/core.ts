@@ -4,7 +4,7 @@
 export { AIFactory } from './ai-factory.js';
 
 export { BaseProvider, buildChatMessages, inlineImage, mergeBody, partsOf, textOf } from './providers/base-provider.js';
-// `runOllamaCLI` / `isOllamaCLIAvailable` moved to '@tanvoid0/bot-client/ollama-cli' (1.8.0): they spawn a process, and this entry must run where `fetch` does.
+// `runOllamaCLI` / `isOllamaCLIAvailable` moved to 'llmwire/ollama-cli' (1.8.0): they spawn a process, and this entry must run where `fetch` does.
 export type { OllamaCLIResult, OllamaCLIOptions } from './ollama-cli.js';
 
 // Wire-format helpers (for custom providers)

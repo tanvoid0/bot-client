@@ -75,11 +75,11 @@ Express server: static files + REST chat. Run with `npm run demo:web`.
 
 ## CLI (npx)
 
-From the project root (or after `npm i @tanvoid0/bot-client`):
+From the project root (or after `npm i llmwire`):
 
 ```bash
-npx @tanvoid0/bot-client ollama list
-npx @tanvoid0/bot-client keys list
+npx llmwire ollama list
+npx llmwire keys list
 ```
 
 See the main [README](../README.md#npx-cli) for all commands.

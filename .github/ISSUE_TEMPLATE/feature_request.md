@@ -21,7 +21,7 @@ Add any other context or screenshots about the feature request here.
 
 **Use case example**
 ```typescript
-import { aiFactory } from '@tanvoid0/bot-client';
+import { aiFactory } from 'llmwire';
 
 // Example of how you'd like to use the new feature
 ```

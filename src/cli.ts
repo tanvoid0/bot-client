@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * CLI for @tanvoid0/bot-client: Ollama models, API keys, and provider config.
- * Run with: npx @tanvoid0/bot-client <command> [subcommand] [options]
+ * CLI for llmwire: Ollama models, API keys, and provider config.
+ * Run with: npx llmwire <command> [subcommand] [options]
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -58,13 +58,13 @@ function mask(value: string): string {
 
 function printHelp(): void {
   const help = `
-bot-client - Ollama models, API keys, and provider config
+llmwire - Ollama models, API keys, and provider config
 
 Usage:
-  npx @tanvoid0/bot-client ollama <command> [args...]
-  npx @tanvoid0/bot-client keys <command> [args...]
-  npx @tanvoid0/bot-client doctor [provider...]
-  npx @tanvoid0/bot-client help
+  npx llmwire ollama <command> [args...]
+  npx llmwire keys <command> [args...]
+  npx llmwire doctor [provider...]
+  npx llmwire help
 
 Doctor:
   Lists each provider's models, then sends it a one-line prompt and prints
@@ -85,13 +85,13 @@ Keys commands (read/write .env in current directory):
   set <key> <value>   Set KEY=value in .env
 
 Examples:
-  npx @tanvoid0/bot-client ollama list
-  npx @tanvoid0/bot-client ollama pull llama3.1:8b
-  npx @tanvoid0/bot-client keys list
-  npx @tanvoid0/bot-client keys set BOT_CLIENT_OPENAI_KEY sk-...
-  npx @tanvoid0/bot-client keys get BOT_CLIENT_OPENAI_KEY --show
-  npx @tanvoid0/bot-client doctor
-  npx @tanvoid0/bot-client doctor groq
+  npx llmwire ollama list
+  npx llmwire ollama pull llama3.1:8b
+  npx llmwire keys list
+  npx llmwire keys set BOT_CLIENT_OPENAI_KEY sk-...
+  npx llmwire keys get BOT_CLIENT_OPENAI_KEY --show
+  npx llmwire doctor
+  npx llmwire doctor groq
 `;
   console.log(help.trim());
 }

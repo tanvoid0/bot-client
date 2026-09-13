@@ -19,7 +19,7 @@ export interface OllamaProviderConfig extends BaseProviderConfig {
   /**
    * The `ollama` binary, for management calls when the server is down and for
    * `serve`, `stop`, `create`. Pass `runOllamaCLI` from
-   * `@tanvoid0/bot-client/ollama-cli`; it lives there so the main entry pulls
+   * `llmwire/ollama-cli`; it lives there so the main entry pulls
    * in no `child_process`. Without it those calls return `ok: false`.
    */
   cli?: typeof runOllamaCLI;
@@ -67,7 +67,7 @@ export class OllamaProvider extends BaseProvider {
     options: OllamaCLIOptions = {}
   ): Promise<OllamaCLIResult> {
     if (!this.cli) {
-      return { ok: false, code: -1, stdout: '', stderr: 'Ollama CLI not configured: pass `cli: runOllamaCLI` from @tanvoid0/bot-client/ollama-cli' };
+      return { ok: false, code: -1, stdout: '', stderr: 'Ollama CLI not configured: pass `cli: runOllamaCLI` from llmwire/ollama-cli' };
     }
     return this.cli(subcommand, args, { ...options, executablePath: options.executablePath ?? this.ollamaExecutablePath });
   }
