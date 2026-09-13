@@ -90,6 +90,8 @@ jobs:
   publish:
     needs: [test, security]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     environment: CI/CD Environment
     env:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
