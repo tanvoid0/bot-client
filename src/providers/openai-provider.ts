@@ -1,4 +1,3 @@
-import axios, { AxiosInstance } from 'axios';
 import { AIRequest, AIResponse } from '../types/index.js';
 import { BaseProvider, buildChatMessages } from './base-provider.js';
 
@@ -12,31 +11,19 @@ export interface OpenAIProviderConfig {
 export class OpenAIProvider extends BaseProvider {
   private apiKey?: string;
   private baseURL: string;
-  private _client: AxiosInstance | null = null;
+  private readonly headers: Record<string, string>;
 
   constructor(config?: OpenAIProviderConfig) {
     super();
     this.apiKey = config?.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.BOT_CLIENT_OPENAI_KEY;
     this.baseURL = config?.baseURL ?? DEFAULT_OPENAI_BASE;
-  }
-
-  private getClient(): AxiosInstance {
-    if (this._client) return this._client;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
-    this._client = axios.create({
-      baseURL: this.baseURL,
-      timeout: 30000,
-      headers
-    });
-    return this._client;
+    this.headers = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
   }
 
   async testConnection(): Promise<boolean> {
     if (!this.apiKey) return false;
     try {
-      const client = this.getClient();
-      await client.get('/v1/models');
+      await this.http(`${this.baseURL}/v1/models`, { headers: this.headers });
       return true;
     } catch {
       return false;
@@ -47,10 +34,9 @@ export class OpenAIProvider extends BaseProvider {
     if (!this.apiKey) return [];
 
     try {
-      const client = this.getClient();
-      const response = await client.get('/v1/models');
+      const response = await this.http(`${this.baseURL}/v1/models`, { headers: this.headers });
 
-      const models = response.data.data || [];
+      const models = response.data || [];
       this._supportedModels = models
         .filter((m: { id?: string }) => m.id?.includes('gpt'))
         .map((m: { id: string }) => m.id);
@@ -75,18 +61,17 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     try {
-      const client = this.getClient();
       const messages = buildChatMessages(request);
-      const response = await client.post('/v1/chat/completions', {
+      const response = await this.http(`${this.baseURL}/v1/chat/completions`, { headers: this.headers, body: {
         model: request.modelId ?? this.supportedModels[0],
         messages,
         ...(request.maxTokens !== undefined && { max_tokens: request.maxTokens }),
         temperature: request.temperature ?? 0.7,
         ...(request.jsonMode && { response_format: { type: 'json_object' } })
-      });
+      } });
 
-      const content = response.data.choices?.[0]?.message?.content ?? '';
-      const usage = response.data.usage;
+      const content = response.choices?.[0]?.message?.content ?? '';
+      const usage = response.usage;
       return this.createResponse(true, content, undefined, request.modelId, {
         promptTokens: usage?.prompt_tokens,
         completionTokens: usage?.completion_tokens,

@@ -1,5 +1,5 @@
 import { AIRequest, AIResponse, AIStreamChunk } from '../types/index.js';
-import { BaseProvider, buildChatMessages, streamLines, readStreamToString } from './base-provider.js';
+import { BaseProvider, buildChatMessages, streamLines } from './base-provider.js';
 import {
   runOllamaCLI,
   isOllamaCLIAvailable,
@@ -27,10 +27,6 @@ export class OllamaProvider extends BaseProvider {
     this.ollamaExecutablePath = config.ollamaExecutablePath ?? 'ollama';
     this.baseURL = config.baseURL ?? 'http://localhost:11434';
     this.preferCLI = config.preferCLI ?? false;
-  }
-
-  private getApiClient() {
-    return this.createClient(this.baseURL);
   }
 
   private async tryApi<T>(fn: () => Promise<T>): Promise<T | null> {
@@ -71,11 +67,7 @@ export class OllamaProvider extends BaseProvider {
   /** Pull a model (API: POST /api/pull, fallback: `ollama pull <model>`). */
   async pull(model: string, options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const client = this.getApiClient();
-      const result = await this.tryApi(async () => {
-        const res = await client.post('/api/pull', { model, stream: false });
-        return res.data;
-      });
+      const result = await this.tryApi(() => this.http(`${this.baseURL}/api/pull`, { body: { model, stream: false } }));
       if (result !== null) return this.apiResult(true, result);
     }
     return this.runCommand('pull', [model], options);
@@ -84,11 +76,7 @@ export class OllamaProvider extends BaseProvider {
   /** List models (API: GET /api/tags, fallback: `ollama ls`). */
   async list(options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const client = this.getApiClient();
-      const result = await this.tryApi(async () => {
-        const res = await client.get('/api/tags');
-        return res.data;
-      });
+      const result = await this.tryApi(() => this.http(`${this.baseURL}/api/tags`));
       if (result !== null) return this.apiResult(true, result);
     }
     return this.runCommand('ls', [], options);
@@ -97,9 +85,8 @@ export class OllamaProvider extends BaseProvider {
   /** Remove a model (API: DELETE /api/delete, fallback: `ollama rm <model>`). */
   async rm(model: string, options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const client = this.getApiClient();
       const ok = await this.tryApi(async () => {
-        await client.delete('/api/delete', { data: { model } });
+        await this.http(`${this.baseURL}/api/delete`, { method: 'DELETE', body: { model } });
         return true;
       });
       if (ok === true) return this.apiResult(true, { status: 'success' });
@@ -113,14 +100,9 @@ export class OllamaProvider extends BaseProvider {
     options: OllamaCLIOptions & { modelfile?: boolean } = {}
   ): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const client = this.getApiClient();
-      const result = await this.tryApi(async () => {
-        const res = await client.post('/api/show', {
-          model,
-          verbose: options.modelfile
-        });
-        return res.data;
-      });
+      const result = await this.tryApi(() =>
+        this.http(`${this.baseURL}/api/show`, { body: { model, verbose: options.modelfile } })
+      );
       if (result !== null) return this.apiResult(true, result);
     }
     const { modelfile, ...cliOpts } = options;
@@ -132,10 +114,9 @@ export class OllamaProvider extends BaseProvider {
   /** Run a model with an optional prompt (API: POST /api/generate when prompt given, fallback: `ollama run`). */
   async run(model: string, prompt?: string, options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI && prompt !== undefined && prompt !== '') {
-      const client = this.getApiClient();
       const result = await this.tryApi(async () => {
-        const res = await client.post('/api/generate', { model, prompt, stream: false });
-        return res.data?.response ?? res.data;
+        const res = await this.http(`${this.baseURL}/api/generate`, { body: { model, prompt, stream: false } });
+        return res?.response ?? res;
       });
       if (result !== null) {
         const text = typeof result === 'string' ? result : (result as { response?: string })?.response ?? JSON.stringify(result);
@@ -149,11 +130,7 @@ export class OllamaProvider extends BaseProvider {
   /** List running models (API: GET /api/ps, fallback: `ollama ps`). */
   async ps(options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const client = this.getApiClient();
-      const result = await this.tryApi(async () => {
-        const res = await client.get('/api/ps');
-        return res.data;
-      });
+      const result = await this.tryApi(() => this.http(`${this.baseURL}/api/ps`));
       if (result !== null) return this.apiResult(true, result);
     }
     return this.runCommand('ps', [], options);
@@ -181,10 +158,9 @@ export class OllamaProvider extends BaseProvider {
 
   async discoverModels(): Promise<string[]> {
     try {
-      const client = this.getApiClient();
-      const response = await client.get('/api/tags');
+      const response = await this.http(`${this.baseURL}/api/tags`);
 
-      const models = response.data.models || [];
+      const models = response.models || [];
       this._supportedModels = models.map((model: { name: string }) => model.name);
 
       return this._supportedModels;
@@ -215,8 +191,7 @@ export class OllamaProvider extends BaseProvider {
 
   async testConnection(): Promise<boolean> {
     try {
-      const client = this.getApiClient();
-      await client.get('/api/tags');
+      await this.http(`${this.baseURL}/api/tags`);
       return true;
     } catch {
       const cli = await this.list();
@@ -229,11 +204,9 @@ export class OllamaProvider extends BaseProvider {
    * JSON object per line, the last carrying `done` and the token counts.
    */
   async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
-    const client = this.getApiClient();
     const modelToUse = request.modelId ?? this.supportedModels[0];
-    const response = await client.post(
-      '/api/chat',
-      {
+    const stream = await this.httpStream(`${this.baseURL}/api/chat`, {
+      body: {
         model: modelToUse,
         messages: buildChatMessages(request),
         stream: true,
@@ -243,21 +216,12 @@ export class OllamaProvider extends BaseProvider {
           ...(request.maxTokens !== undefined && { num_predict: request.maxTokens })
         }
       },
-      {
-          responseType: 'stream',
-        // 30s client default is a socket idle timeout, which kills a cold model load or a stall mid-stream.
-        timeout: 0,
-        signal: request.signal,
-        validateStatus: () => true,
-      },
-    );
+      // The 30s default would kill a cold model load or a stall mid-stream.
+      timeout: 0,
+      signal: request.signal,
+    });
 
-    if (response.status >= 300) {
-      const text = await readStreamToString(response.data as AsyncIterable<Buffer>);
-      throw new Error(`Ollama stream HTTP ${response.status}: ${text.slice(0, 200)}`);
-    }
-
-    for await (const line of streamLines(response.data as AsyncIterable<Buffer>)) {
+    for await (const line of streamLines(stream)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       let parsed: any;
@@ -295,11 +259,10 @@ export class OllamaProvider extends BaseProvider {
 
   async process(request: AIRequest): Promise<AIResponse> {
     try {
-      const client = this.getApiClient();
       const modelToUse = request.modelId ?? this.supportedModels[0];
 
       const messages = buildChatMessages(request);
-      const response = await client.post('/api/chat', {
+      const response = await this.http(`${this.baseURL}/api/chat`, { body: {
         model: modelToUse,
         messages,
         stream: false,
@@ -308,11 +271,11 @@ export class OllamaProvider extends BaseProvider {
           temperature: request.temperature ?? 0.7,
           ...(request.maxTokens !== undefined && { num_predict: request.maxTokens })
         }
-      });
+      } });
 
-      const content = response.data.message?.content ?? '';
-      const promptTokens = response.data.prompt_eval_count;
-      const completionTokens = response.data.eval_count;
+      const content = response.message?.content ?? '';
+      const promptTokens = response.prompt_eval_count;
+      const completionTokens = response.eval_count;
       return this.createResponse(
         true,
         content,

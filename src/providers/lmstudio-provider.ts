@@ -9,23 +9,15 @@ export interface LMStudioProviderConfig {
 
 export class LMStudioProvider extends BaseProvider {
   private readonly baseURL: string;
-  private _client: ReturnType<BaseProvider['createClient']> | null = null;
 
   constructor(config?: LMStudioProviderConfig) {
     super();
     this.baseURL = config?.baseURL ?? DEFAULT_LMSTUDIO_BASE;
   }
 
-  private getClient(): ReturnType<BaseProvider['createClient']> {
-    if (this._client) return this._client;
-    this._client = this.createClient(this.baseURL);
-    return this._client;
-  }
-
   async testConnection(): Promise<boolean> {
     try {
-      const client = this.getClient();
-      await client.get('/v1/models');
+      await this.http(`${this.baseURL}/v1/models`);
       return true;
     } catch {
       return false;
@@ -34,10 +26,9 @@ export class LMStudioProvider extends BaseProvider {
 
   async discoverModels(): Promise<string[]> {
     try {
-      const client = this.getClient();
-      const response = await client.get('/v1/models');
+      const response = await this.http(`${this.baseURL}/v1/models`);
 
-      const models = response.data.data || [];
+      const models = response.data || [];
       // Only include chat/LLM models; exclude embedding models (e.g. "text-embedding-*") so
       // default model for generate() is valid for /v1/chat/completions.
       const chatModels = models.filter(
@@ -70,16 +61,15 @@ export class LMStudioProvider extends BaseProvider {
           undefined
         );
       }
-      const client = this.getClient();
       const messages = buildChatMessages(request);
-      const response = await client.post('/v1/chat/completions', {
+      const response = await this.http(`${this.baseURL}/v1/chat/completions`, { body: {
         model: request.modelId ?? defaultModel,
         messages,
         max_tokens: request.maxTokens ?? 1000,
         temperature: request.temperature ?? 0.7
-      });
+      } });
 
-      const content = response.data.choices?.[0]?.message?.content ?? '';
+      const content = response.choices?.[0]?.message?.content ?? '';
       return this.createResponse(true, content, undefined, request.modelId);
     } catch (error) {
       this.handleError(error, 'LM Studio processing');

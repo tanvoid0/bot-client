@@ -3,7 +3,6 @@
  * No API keys required. Tests are skipped when no local provider is reachable.
  */
 
-import axios from 'axios';
 import { AIFactory, OllamaProvider, LMStudioProvider } from '../src/index.js';
 
 const CHECK_TIMEOUT = 2000;
@@ -12,7 +11,7 @@ const INTEGRATION_TEST_TIMEOUT = 25000;
 
 async function isOllamaAvailable(): Promise<boolean> {
   try {
-    await axios.get('http://localhost:11434/api/tags', { timeout: CHECK_TIMEOUT });
+    await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(CHECK_TIMEOUT) });
     return true;
   } catch {
     return false;
@@ -21,7 +20,7 @@ async function isOllamaAvailable(): Promise<boolean> {
 
 async function isLMStudioAvailable(): Promise<boolean> {
   try {
-    await axios.get('http://localhost:1234/v1/models', { timeout: CHECK_TIMEOUT });
+    await fetch('http://localhost:1234/v1/models', { signal: AbortSignal.timeout(CHECK_TIMEOUT) });
     return true;
   } catch {
     return false;

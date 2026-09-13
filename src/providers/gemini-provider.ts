@@ -1,6 +1,5 @@
-import axios, { AxiosInstance } from 'axios';
 import { AIRequest, AIResponse, AIStreamChunk } from '../types/index.js';
-import { BaseProvider, buildChatMessages, streamLines, readStreamToString } from './base-provider.js';
+import { BaseProvider, buildChatMessages, streamLines } from './base-provider.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com';
 
@@ -16,28 +15,16 @@ export interface GeminiProviderConfig {
 
 export class GeminiProvider extends BaseProvider {
   private apiKey?: string;
-  private _client: AxiosInstance | null = null;
 
   constructor(config?: GeminiProviderConfig) {
     super();
     this.apiKey = config?.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.BOT_CLIENT_GEMINI_KEY;
   }
 
-  private getClient(): AxiosInstance {
-    if (this._client) return this._client;
-    this._client = axios.create({
-      baseURL: GEMINI_BASE,
-      timeout: 30000,
-      headers: { 'Content-Type': 'application/json' }
-    });
-    return this._client;
-  }
-
   async testConnection(): Promise<boolean> {
     if (!this.apiKey) return false;
     try {
-      const client = this.getClient();
-      await client.get('/v1beta/models', { params: { key: this.apiKey } });
+      await this.http(`${GEMINI_BASE}/v1beta/models`, { params: { key: this.apiKey } });
       return true;
     } catch {
       return false;
@@ -48,16 +35,13 @@ export class GeminiProvider extends BaseProvider {
     if (!this.apiKey) return [];
 
     try {
-      const client = this.getClient();
-      const response = await client.get('/v1beta/models', {
-        params: { key: this.apiKey }
-      });
-      
-      const models = response.data.models || [];
+      const response = await this.http(`${GEMINI_BASE}/v1beta/models`, { params: { key: this.apiKey } });
+
+      const models = response.models || [];
       this._supportedModels = models
         .filter((model: any) => model.name.includes('gemini'))
         .map((model: any) => model.name.split('/').pop());
-      
+
       return this._supportedModels;
     } catch (error) {
       return [];
@@ -117,28 +101,17 @@ export class GeminiProvider extends BaseProvider {
     if (!this.apiKey) {
       throw new Error('Gemini API key required');
     }
-    const client = this.getClient();
     const modelId = request.modelId ?? this.supportedModels[0] ?? 'gemini-2.0-flash';
-    const response = await client.post(
-      `/v1beta/models/${modelId}:streamGenerateContent`,
-      this.buildBody(request),
-      {
-        params: { key: this.apiKey, alt: 'sse' },
-        responseType: 'stream',
-        // 30s client default is a socket idle timeout, which kills a cold model load or a stall mid-stream.
-        timeout: 0,
-        signal: request.signal,
-        validateStatus: () => true,
-      },
-    );
-
-    if (response.status >= 300) {
-      const text = await readStreamToString(response.data as AsyncIterable<Buffer>);
-      throw new Error(`Gemini stream HTTP ${response.status}: ${text.slice(0, 200)}`);
-    }
+    const stream = await this.httpStream(`${GEMINI_BASE}/v1beta/models/${modelId}:streamGenerateContent`, {
+      params: { key: this.apiKey, alt: 'sse' },
+      body: this.buildBody(request),
+      // The 30s default would kill a cold model load or a stall mid-stream.
+      timeout: 0,
+      signal: request.signal,
+    });
 
     let usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number } | undefined;
-    for await (const line of streamLines(response.data as AsyncIterable<Buffer>)) {
+    for await (const line of streamLines(stream)) {
       if (!line.startsWith('data:')) continue;
       const payload = line.slice(5).trim();
       if (!payload || payload === '[DONE]') continue;
@@ -175,17 +148,15 @@ export class GeminiProvider extends BaseProvider {
     }
 
     try {
-      const client = this.getClient();
       const modelId = request.modelId ?? this.supportedModels[0] ?? 'gemini-2.0-flash';
-      const response = await client.post(
-        `/v1beta/models/${modelId}:generateContent`,
-        this.buildBody(request),
-        { params: { key: this.apiKey } }
-      );
+      const response = await this.http(`${GEMINI_BASE}/v1beta/models/${modelId}:generateContent`, {
+        params: { key: this.apiKey },
+        body: this.buildBody(request)
+      });
 
-      const content = response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const content = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       const modelUsed = request.modelId ?? modelId;
-      const usage = response.data.usageMetadata;
+      const usage = response.usageMetadata;
       return this.createResponse(true, content, undefined, modelUsed, {
         promptTokens: usage?.promptTokenCount,
         completionTokens: usage?.candidatesTokenCount,

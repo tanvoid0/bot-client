@@ -7,6 +7,17 @@ import type { AIStreamChunk } from '../src/index.js';
 /** Feeds bytes in exactly the pieces given, framing be damned. */
 const chunked = (pieces: string[]) => Readable.from(pieces.map((p) => Buffer.from(p)));
 
+/** `fetch` answering 200 with the pieces as the streamed body. */
+function stubStream(pieces: string[]) {
+  return jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(Readable.toWeb(chunked(pieces)) as any, { status: 200 }));
+}
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 async function collect(
   stream: AsyncGenerator<AIStreamChunk, void, void>,
 ): Promise<AIStreamChunk[]> {
@@ -41,15 +52,12 @@ describe('streamLines', () => {
 describe('GeminiProvider.processStream', () => {
   it('yields text as it arrives and usage at the end', async () => {
     const provider = new GeminiProvider({ apiKey: 'test-key' });
-    const post = jest.fn().mockResolvedValue({
-      data: chunked([
-        'data: {"candidates":[{"content":{"parts":[{"text":"Hello "}]}}]}\n',
-        'data: {"candidates":[{"content":{"parts":[{"text":"there"}]}}],',
-        '"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9}}\n',
-        'data: [DONE]\n',
-      ]),
-    });
-    (provider as unknown as { _client: unknown })._client = { post };
+    const fetchMock = stubStream([
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello "}]}}]}\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"there"}]}}],',
+      '"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9}}\n',
+      'data: [DONE]\n',
+    ]);
 
     const controller = new AbortController();
     const chunks = await collect(
@@ -69,23 +77,19 @@ describe('GeminiProvider.processStream', () => {
       totalTokens: 9,
     });
     // Streaming endpoint, SSE framing.
-    expect(post.mock.calls[0][0]).toContain(':streamGenerateContent');
-    expect(post.mock.calls[0][2].params.alt).toBe('sse');
-    // No socket idle timeout, and the caller's abort signal is wired through.
-    expect(post.mock.calls[0][2].timeout).toBe(0);
-    expect(post.mock.calls[0][2].signal).toBe(controller.signal);
+    const url = fetchMock.mock.calls[0][0] as URL;
+    expect(url.pathname).toContain(':streamGenerateContent');
+    expect(url.searchParams.get('alt')).toBe('sse');
+    // No timeout wrapper: the caller's abort signal is passed through as-is.
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 
   it('skips a frame that is not JSON rather than failing the answer', async () => {
     const provider = new GeminiProvider({ apiKey: 'test-key' });
-    (provider as unknown as { _client: unknown })._client = {
-      post: jest.fn().mockResolvedValue({
-        data: chunked([
-          'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n',
-          'data: {broken\n',
-        ]),
-      }),
-    };
+    stubStream([
+      'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n',
+      'data: {broken\n',
+    ]);
 
     const chunks = await collect(provider.processStream({ prompt: 'hi' }));
     expect(chunks.map((c) => c.text).join('')).toBe('ok');
@@ -95,13 +99,10 @@ describe('GeminiProvider.processStream', () => {
 describe('OllamaProvider.processStream', () => {
   it('reads NDJSON and reports the token counts', async () => {
     const provider = new OllamaProvider({});
-    const post = jest.fn().mockResolvedValue({
-      data: chunked([
-        '{"message":{"content":"one "}}\n{"message":{"content":"two"}}\n',
-        '{"done":true,"prompt_eval_count":5,"eval_count":3}\n',
-      ]),
-    });
-    (provider as unknown as { createClient: unknown }).createClient = () => ({ post });
+    const fetchMock = stubStream([
+      '{"message":{"content":"one "}}\n{"message":{"content":"two"}}\n',
+      '{"done":true,"prompt_eval_count":5,"eval_count":3}\n',
+    ]);
 
     const controller = new AbortController();
     const chunks = await collect(
@@ -110,20 +111,16 @@ describe('OllamaProvider.processStream', () => {
 
     expect(chunks.map((c) => c.text).join('')).toBe('one two');
     expect(chunks[chunks.length - 1].usage?.totalTokens).toBe(8);
-    // No socket idle timeout, and the caller's abort signal is wired through.
-    expect(post.mock.calls[0][2].timeout).toBe(0);
-    expect(post.mock.calls[0][2].signal).toBe(controller.signal);
+    // No timeout wrapper: the caller's abort signal is passed through as-is.
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 
   it('throws on a mid-stream error line instead of ending silently', async () => {
     const provider = new OllamaProvider({});
-    const post = jest.fn().mockResolvedValue({
-      data: chunked([
-        '{"message":{"content":"partial "}}\n',
-        '{"error":"model runner crashed"}\n',
-      ]),
-    });
-    (provider as unknown as { createClient: unknown }).createClient = () => ({ post });
+    stubStream([
+      '{"message":{"content":"partial "}}\n',
+      '{"error":"model runner crashed"}\n',
+    ]);
 
     await expect(collect(provider.processStream({ prompt: 'hi' }))).rejects.toThrow(
       'model runner crashed',

@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio. Zero-config for local; API keys for cloud. One request shape for every provider, with **streaming**, **JSON mode** and **abort** where the provider supports them. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
+Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+). One request shape for every provider, with **streaming**, **JSON mode** and **abort** where the provider supports them. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
 
 ---
 

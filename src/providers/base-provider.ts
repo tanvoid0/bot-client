@@ -1,4 +1,3 @@
-import axios, { AxiosInstance } from 'axios';
 import { StringDecoder } from 'node:string_decoder';
 import { AIProvider, AIRequest, AIResponse, AIError, AIStreamChunk, TokenUsage } from '../types/index.js';
 
@@ -19,8 +18,48 @@ export function buildChatMessages(request: AIRequest): Array<{ role: 'system' | 
   return messages;
 }
 
+const DEFAULT_TIMEOUT_MS = 30000;
+
+export interface HttpOptions {
+  method?: 'GET' | 'POST' | 'DELETE';
+  /** JSON-serialised. Presence makes the default method POST. */
+  body?: unknown;
+  headers?: Record<string, string>;
+  params?: Record<string, string>;
+  signal?: AbortSignal;
+  /** Whole-request timeout in ms; 0 disables it (streams). Default 30000. */
+  timeout?: number;
+}
+
+/** A non-2xx reply. `json` is the parsed body when it was JSON, so `handleError` can lift the API's own message. */
+export class HttpError extends Error {
+  readonly json: any;
+  constructor(readonly status: number, readonly body: string) {
+    super(`HTTP ${status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+    this.name = 'HttpError';
+    try {
+      this.json = body ? JSON.parse(body) : undefined;
+    } catch {
+      this.json = undefined;
+    }
+  }
+}
+
+/** Caller's signal, aborted early by the timeout too. Passes the caller's signal through untouched when there is no timeout. */
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
+  if (timeoutMs <= 0) return signal;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs);
+  timer.unref?.();
+  if (signal) {
+    if (signal.aborted) controller.abort(signal.reason);
+    else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+  return controller.signal;
+}
+
 export abstract class BaseProvider implements AIProvider {
-  protected client!: AxiosInstance;
   protected _supportedModels: string[] = [];
 
   constructor() {
@@ -74,22 +113,40 @@ export abstract class BaseProvider implements AIProvider {
     }
   }
 
-  protected createClient(baseURL?: string, options?: { headers?: Record<string, string> }): AxiosInstance {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (options?.headers) {
-      Object.assign(headers, options.headers);
-    }
-    const client = axios.create({
-      timeout: 30000,
+  /** JSON request on the global `fetch`. Non-2xx throws [HttpError]; the JSON body (if any) is on `.json`. */
+  protected async http<T = any>(url: string, options: HttpOptions = {}): Promise<T> {
+    const res = await this.fetchRaw(url, options);
+    const text = await res.text();
+    return text ? (JSON.parse(text) as T) : (undefined as T);
+  }
+
+  /** Streaming request: resolves to the body as an async iterable of bytes. Non-2xx throws [HttpError]. */
+  protected async httpStream(url: string, options: HttpOptions = {}): Promise<AsyncIterable<Uint8Array>> {
+    const res = await this.fetchRaw(url, options);
+    if (!res.body) return (async function* () {})();
+    return res.body as unknown as AsyncIterable<Uint8Array>;
+  }
+
+  private async fetchRaw(url: string, options: HttpOptions): Promise<Response> {
+    const target = new URL(url);
+    for (const [k, v] of Object.entries(options.params ?? {})) target.searchParams.set(k, v);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...options.headers };
+    const res = await fetch(target, {
+      method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
       headers,
-      ...(baseURL && { baseURL })
+      ...(options.body !== undefined && { body: JSON.stringify(options.body) }),
+      signal: withTimeout(options.signal, options.timeout ?? DEFAULT_TIMEOUT_MS),
     });
-    return client;
+    if (!res.ok) {
+      const body = await res.text();
+      throw new HttpError(res.status, body);
+    }
+    return res;
   }
 
   protected handleError(error: unknown, operation: string): never {
-    const err = error as { response?: { data?: { error?: { message?: string } } }; message?: string };
-    const message = err.response?.data?.error?.message || err.message || 'Unknown error';
+    const err = error as { json?: { error?: { message?: string } }; message?: string };
+    const message = err.json?.error?.message || err.message || 'Unknown error';
     throw new AIError(`${operation} failed: ${message}`, this.providerId);
   }
 
@@ -116,14 +173,14 @@ export abstract class BaseProvider implements AIProvider {
 }
 
 /**
- * Splits a Node readable (axios `responseType: 'stream'`) into lines.
+ * Splits a byte stream (a `fetch` body, or any async iterable of chunks) into lines.
  *
  * Both streaming APIs frame their chunks by newline -- SSE for Gemini, NDJSON
  * for Ollama -- and neither guarantees a network chunk ends on one, so the
  * tail is carried into the next read rather than parsed as a broken line.
  */
 export async function* streamLines(
-  stream: AsyncIterable<Buffer | string>,
+  stream: AsyncIterable<Uint8Array | string>,
 ): AsyncGenerator<string, void, void> {
   let buffer = '';
   const decoder = new StringDecoder('utf8');
@@ -138,13 +195,4 @@ export async function* streamLines(
   }
   buffer += decoder.end();
   if (buffer.trim()) yield buffer;
-}
-
-/** Drains a Node readable into a string -- used to read the error body of a non-2xx `responseType: 'stream'` response. */
-export async function readStreamToString(stream: AsyncIterable<Buffer | string>): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk);
-  }
-  return Buffer.concat(chunks).toString('utf8');
 }

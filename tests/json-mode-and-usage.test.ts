@@ -1,20 +1,16 @@
-import axios from 'axios';
 import { AIFactory, GeminiProvider, OllamaProvider, type AIProvider } from '../src/index.js';
 
-jest.mock('axios');
-
-const mockedAxios = axios as jest.Mocked<typeof axios>;
-
-/** Captures what a provider sends and replays a canned reply. */
-function stubAxios(reply: unknown) {
-  const post = jest.fn().mockResolvedValue({ data: reply });
-  const get = jest.fn().mockResolvedValue({ data: { models: [] } });
-  mockedAxios.create.mockReturnValue({ post, get } as never);
-  return { post, get };
+/** Replays a canned JSON reply from `fetch`; `body()` is what the provider sent. */
+function stubFetch(reply: unknown) {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify(reply), { status: 200 }));
+  const body = () => JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+  return { fetchMock, body };
 }
 
-beforeEach(() => {
-  jest.clearAllMocks();
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('Gemini provider', () => {
@@ -28,26 +24,24 @@ describe('Gemini provider', () => {
   };
 
   test('jsonMode asks for an application/json response', async () => {
-    const { post } = stubAxios(reply);
+    const { body } = stubFetch(reply);
     await new GeminiProvider({ apiKey: 'k' }).process({
       prompt: 'hi',
       jsonMode: true,
     });
 
-    const body = post.mock.calls[0][1] as any;
-    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body().generationConfig.responseMimeType).toBe('application/json');
   });
 
   test('without jsonMode no response mime type is forced', async () => {
-    const { post } = stubAxios(reply);
+    const { body } = stubFetch(reply);
     await new GeminiProvider({ apiKey: 'k' }).process({ prompt: 'hi' });
 
-    const body = post.mock.calls[0][1] as any;
-    expect(body.generationConfig.responseMimeType).toBeUndefined();
+    expect(body().generationConfig.responseMimeType).toBeUndefined();
   });
 
   test('a response schema is passed through', async () => {
-    const { post } = stubAxios(reply);
+    const { body } = stubFetch(reply);
     const schema = { type: 'object', properties: { ok: { type: 'boolean' } } };
     await new GeminiProvider({ apiKey: 'k' }).process({
       prompt: 'hi',
@@ -55,12 +49,11 @@ describe('Gemini provider', () => {
       responseSchema: schema,
     });
 
-    const body = post.mock.calls[0][1] as any;
-    expect(body.generationConfig.responseSchema).toEqual(schema);
+    expect(body().generationConfig.responseSchema).toEqual(schema);
   });
 
   test('token usage is reported so callers can bill it', async () => {
-    stubAxios(reply);
+    stubFetch(reply);
     const response = await new GeminiProvider({ apiKey: 'k' }).process({
       prompt: 'hi',
     });
@@ -71,15 +64,14 @@ describe('Gemini provider', () => {
   });
 
   test('the output cap leaves room for structured replies', async () => {
-    const { post } = stubAxios(reply);
+    const { body } = stubFetch(reply);
     await new GeminiProvider({ apiKey: 'k' }).process({ prompt: 'hi' });
 
-    const body = post.mock.calls[0][1] as any;
-    expect(body.generationConfig.maxOutputTokens).toBeGreaterThanOrEqual(8192);
+    expect(body().generationConfig.maxOutputTokens).toBeGreaterThanOrEqual(8192);
   });
 
   test('a request without usage metadata omits the token fields', async () => {
-    stubAxios({ candidates: [{ content: { parts: [{ text: 'hi' }] } }] });
+    stubFetch({ candidates: [{ content: { parts: [{ text: 'hi' }] } }] });
     const response = await new GeminiProvider({ apiKey: 'k' }).process({
       prompt: 'hi',
     });
@@ -98,16 +90,15 @@ describe('Ollama provider', () => {
   };
 
   test('jsonMode sets the native json format', async () => {
-    const { post } = stubAxios(reply);
+    const { body } = stubFetch(reply);
     const provider = new OllamaProvider();
     await provider.process({ prompt: 'hi', modelId: 'gemma4', jsonMode: true });
 
-    const body = post.mock.calls[0][1] as any;
-    expect(body.format).toBe('json');
+    expect(body().format).toBe('json');
   });
 
   test('token counts are summed into tokensUsed', async () => {
-    stubAxios(reply);
+    stubFetch(reply);
     const response = await new OllamaProvider().process({
       prompt: 'hi',
       modelId: 'gemma4',

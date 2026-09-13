@@ -1,4 +1,3 @@
-import axios, { AxiosInstance } from 'axios';
 import { AIRequest, AIResponse } from '../types/index.js';
 import { BaseProvider, buildChatMessages } from './base-provider.js';
 
@@ -14,26 +13,10 @@ export interface AnthropicProviderConfig {
 
 export class AnthropicProvider extends BaseProvider {
   private apiKey?: string;
-  private _client: AxiosInstance | null = null;
 
   constructor(config?: AnthropicProviderConfig) {
     super();
     this.apiKey = config?.apiKey ?? process.env.ANTHROPIC_API_KEY ?? process.env.BOT_CLIENT_ANTHROPIC_KEY;
-  }
-
-  private getClient(): AxiosInstance {
-    if (this._client) return this._client;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01'
-    };
-    if (this.apiKey) headers['x-api-key'] = this.apiKey;
-    this._client = axios.create({
-      baseURL: ANTHROPIC_BASE,
-      timeout: 30000,
-      headers
-    });
-    return this._client;
   }
 
   async discoverModels(): Promise<string[]> {
@@ -54,7 +37,6 @@ export class AnthropicProvider extends BaseProvider {
     }
 
     try {
-      const client = this.getClient();
       // The Messages API takes the system prompt as a top-level field and
       // rejects a system role inside `messages`.
       const all = buildChatMessages(request);
@@ -64,17 +46,20 @@ export class AnthropicProvider extends BaseProvider {
         .join(SYSTEM_JOINER);
       const messages = all.filter((m) => m.role !== 'system');
 
-      const response = await client.post('/v1/messages', {
+      const response = await this.http(`${ANTHROPIC_BASE}/v1/messages`, {
+        headers: { 'anthropic-version': '2023-06-01', 'x-api-key': this.apiKey },
+        body: {
         model: request.modelId ?? DEFAULT_MODEL,
         messages,
         ...(system && { system }),
         max_tokens: request.maxTokens ?? 4096,
         temperature: request.temperature ?? 0.7
+        }
       });
 
-      const content = response.data.content?.[0]?.text ?? '';
+      const content = response.content?.[0]?.text ?? '';
       const modelUsed = request.modelId ?? DEFAULT_MODEL;
-      const usage = response.data.usage;
+      const usage = response.usage;
       return this.createResponse(true, content, undefined, modelUsed, {
         promptTokens: usage?.input_tokens,
         completionTokens: usage?.output_tokens,
