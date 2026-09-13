@@ -1,23 +1,39 @@
-import { AIProvider, AIRequest, AIResponse, AIError, AIFactoryConfig, AIStreamChunk } from './types/index.js';
+import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode } from './types/index.js';
+import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
+import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
+import { guessProvider, splitExplicit } from './core/catalog.js';
 import { OpenAIProvider } from './providers/openai-provider.js';
 import { OllamaProvider } from './providers/ollama-provider.js';
 import { LMStudioProvider } from './providers/lmstudio-provider.js';
 import { AnthropicProvider } from './providers/anthropic-provider.js';
 import { GeminiProvider } from './providers/gemini-provider.js';
 
+const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
 export class AIFactory {
   private providers: Map<string, AIProvider> = new Map();
   private initializationPromise: Promise<void> | null = null;
+  private probed = new Set<string>();
+  /** Providers that failed their connection check at eager init, with the reason. */
+  private unavailable = new Map<string, string>();
   private readonly config: AIFactoryConfig;
+  private readonly retry: Required<RetryOptions>;
+  private readonly discover: DiscoveryMode;
 
   constructor(config?: AIFactoryConfig) {
     this.config = config ?? {};
+    this.retry = {
+      ...DEFAULT_RETRY,
+      ...this.config.retry,
+      ...(this.config.retries !== undefined && { retries: this.config.retries }),
+    };
+    this.discover = this.config.discover ?? 'eager';
   }
 
   /**
-   * Provider discovery probes every provider over the network, and for cloud
-   * providers `testConnection` costs a real request. It runs on first use, not
-   * on construction, so importing or wiring this into a DI container is free.
+   * Provider discovery probes providers over the network. It runs on first
+   * use, not on construction, so importing or wiring this into a DI container
+   * is free.
    */
   private ensureInitialized(): Promise<void> {
     if (this.initializationPromise) return this.initializationPromise;
@@ -35,129 +51,330 @@ export class AIFactory {
     this.config.logger?.[level]?.(message, ...args);
   }
 
-  private async initializeProviders(): Promise<void> {
-    const list = this.config.providers !== undefined
+  private candidates(): AIProvider[] {
+    return this.config.providers !== undefined
       ? this.config.providers
-      : [
-          new OpenAIProvider(),
-          new AnthropicProvider(),
-          new GeminiProvider(),
-          new OllamaProvider(),
-          new LMStudioProvider()
-        ];
+      : [new OpenAIProvider(), new AnthropicProvider(), new GeminiProvider(), new OllamaProvider(), new LMStudioProvider()];
+  }
 
+  private async initializeProviders(): Promise<void> {
+    const list = this.candidates();
     this.log('info', 'Initializing AI providers...');
 
-    for (const provider of list) {
-      try {
-        this.log('info', `Testing ${provider.providerName}...`);
-        await provider.discoverModels();
-
-        if (await provider.testConnection()) {
-          this.providers.set(provider.providerId, provider);
-          this.log('info', `${provider.providerName} initialized successfully with ${provider.supportedModels.length} models`);
-        } else {
-          this.log('warn', `${provider.providerName} connection test failed`);
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        this.log('warn', `${provider.providerName} initialization failed: ${msg}`);
-      }
+    if (this.discover === 'eager') {
+      // All probes in parallel: first use waits for the slowest provider, not the sum.
+      await Promise.all(
+        list.map(async (provider) => {
+          try {
+            this.log('info', `Testing ${provider.providerName}...`);
+            await provider.discoverModels();
+            if (await provider.testConnection()) {
+              this.providers.set(provider.providerId, provider);
+              this.log('info', `${provider.providerName} initialized successfully with ${provider.supportedModels.length} models`);
+            } else {
+              this.unavailable.set(provider.providerId, 'connection test failed (missing or rejected API key, or server not running)');
+              this.log('warn', `${provider.providerName} connection test failed`);
+            }
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.unavailable.set(provider.providerId, msg);
+            this.log('warn', `${provider.providerName} initialization failed: ${msg}`);
+          } finally {
+            this.probed.add(provider.providerId);
+          }
+        })
+      );
+      // Keep the configured order, not the order probes finished in.
+      const ordered = new Map<string, AIProvider>();
+      for (const p of list) if (this.providers.has(p.providerId)) ordered.set(p.providerId, p);
+      this.providers = ordered;
+    } else {
+      for (const provider of list) this.providers.set(provider.providerId, provider);
     }
 
     this.log('info', `Total providers available: ${this.providers.size}`);
   }
 
-  /** Resolve which provider to use for this request (modelId, defaultProvider, providerOrder, or first). */
-  private resolveProvider(request: AIRequest): AIProvider | null {
-    if (request.modelId) {
-      const byModel = this.getProviderForModel(request.modelId);
-      if (byModel) return byModel;
+  /** `lazy` mode: list a provider's models the first time a request lands on it. */
+  private async probe(provider: AIProvider): Promise<void> {
+    if (this.discover !== 'lazy' || this.probed.has(provider.providerId)) return;
+    // Seeded models mean the caller already knows what to send; no probe needed.
+    if (provider.supportedModels.length > 0) return;
+    this.probed.add(provider.providerId);
+    try {
+      await provider.discoverModels();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.log('warn', `${provider.providerName} discovery failed: ${msg}`);
     }
+  }
+
+  /**
+   * Which provider handles this request, and the request as that provider
+   * should see it (an explicit `openai/gpt-4o` prefix is stripped).
+   *
+   * Order: explicit prefix, a provider that lists the model, the static
+   * catalog, `defaultProvider`, `providerOrder`, first registered.
+   */
+  private resolve(request: AIRequest): { provider: AIProvider; request: AIRequest } | AIError {
+    const req: AIRequest = {
+      ...request,
+      timeout: request.timeout ?? this.config.timeout,
+      streamIdleTimeout: request.streamIdleTimeout ?? this.config.streamIdleTimeout,
+    };
+    if (req.modelId) {
+      const explicit = splitExplicit(req.modelId, [...this.providers.keys(), ...this.unavailable.keys()]);
+      if (explicit) {
+        const p = this.providers.get(explicit.providerId);
+        return p ? { provider: p, request: { ...req, modelId: explicit.modelId } } : this.notAvailable(explicit.providerId, req.modelId);
+      }
+      const byModel = this.getProviderForModel(req.modelId);
+      if (byModel) return { provider: byModel, request: req };
+      const guessed = guessProvider(req.modelId);
+      if (guessed && this.providers.has(guessed)) return { provider: this.providers.get(guessed)!, request: req };
+      // The model clearly belongs to a provider we probed and dropped: say so
+      // rather than sending `gpt-4o` to Ollama and reporting "model not found".
+      if (guessed && this.unavailable.has(guessed)) return this.notAvailable(guessed, req.modelId);
+    }
+    const provider = this.resolveDefault();
+    return provider ? { provider, request: req } : this.noProviders();
+  }
+
+  private notAvailable(providerId: string, modelId: string): AIError {
+    const available = this.getAvailableProviders();
+    return AIError.from({
+      message: `Provider "${providerId}" (for model "${modelId}") is not available: ${this.unavailable.get(providerId)}`,
+      provider: providerId,
+      code: 'NO_PROVIDERS',
+      model: modelId,
+      hint: available.length
+        ? `Fix the ${providerId} setup, or pick a model from an available provider (${available.join(', ')}).`
+        : `Fix the ${providerId} setup (API key or server), then retry.`,
+    });
+  }
+
+  private resolveDefault(): AIProvider | null {
     if (this.config.defaultProvider && this.providers.has(this.config.defaultProvider)) {
       return this.providers.get(this.config.defaultProvider)!;
     }
-    if (this.config.providerOrder?.length) {
-      for (const id of this.config.providerOrder) {
-        if (this.providers.has(id)) return this.providers.get(id)!;
-      }
+    for (const id of this.config.providerOrder ?? []) {
+      if (this.providers.has(id)) return this.providers.get(id)!;
     }
     return this.providers.values().next().value ?? null;
   }
 
-  async generate(prompt: string, options?: Partial<AIRequest>): Promise<string> {
-    await this.ensureInitialized();
-
-    const response = await this.process({ prompt, ...options });
-
-    if (!response.success) {
-      throw new AIError(response.error ?? 'Generation failed', 'AIFactory');
+  /** Providers to try after `primary`, in order, deduplicated. */
+  private fallbacks(primary: AIProvider): AIProvider[] {
+    const ids = [this.config.fallbackProvider, ...(this.config.fallbackProviders ?? [])];
+    const out: AIProvider[] = [];
+    for (const id of ids) {
+      if (!id || id === primary.providerId) continue;
+      const p = this.providers.get(id);
+      if (p && !out.includes(p)) out.push(p);
     }
+    return out;
+  }
 
+  private noProviders(): AIError {
+    return AIError.from({
+      message: 'No AI providers available',
+      provider: 'AIFactory',
+      code: 'NO_PROVIDERS',
+      hint: 'No provider passed its connection check; set an API key or start a local server (ollama serve).',
+    });
+  }
+
+  async generate(prompt: string, options?: Partial<AIRequest>): Promise<string> {
+    const response = await this.process({ prompt, ...options });
+    if (!response.success) {
+      throw response.errorInfo ?? new AIError(response.error ?? 'Generation failed', response.providerId ?? 'AIFactory');
+    }
     return response.data ?? '';
   }
 
+  /**
+   * One answer, with retries and fallback.
+   *
+   * A retryable failure (rate limit, overload, network, timeout) is retried
+   * with backoff, honouring `Retry-After`; anything else moves straight to the
+   * next fallback provider. Never throws for a provider failure: the result
+   * carries `success: false` and a classified `errorInfo`.
+   */
   async process(request: AIRequest): Promise<AIResponse> {
     await this.ensureInitialized();
-
-    let provider = this.resolveProvider(request);
-    if (!provider) {
-      return {
-        success: false,
-        error: 'No AI providers available',
-        providerId: 'none'
-      };
+    const started = now();
+    const resolved = this.resolve(request);
+    if (resolved instanceof AIError) {
+      return this.finish(
+        { success: false, error: resolved.message, errorInfo: resolved, providerId: resolved.code === 'NO_PROVIDERS' && resolved.provider === 'AIFactory' ? 'none' : resolved.provider, modelUsed: request.modelId, finishReason: 'error' },
+        started, 0, false
+      );
     }
 
-    const maxRetries = this.config.retries ?? 0;
-    let result = await provider.process(request);
-    let attempts = 0;
-    while (!result.success && attempts < maxRetries) {
-      attempts++;
-      result = await provider.process(request);
-    }
-    if (!result.success && this.config.fallbackProvider && this.config.fallbackProvider !== provider.providerId) {
-      const fallback = this.providers.get(this.config.fallbackProvider);
-      if (fallback) {
-        result = await fallback.process(request);
+    let retryCount = 0;
+    let fallbackUsed = false;
+    let last: AIResponse | undefined;
+    const chain = [resolved.provider, ...this.fallbacks(resolved.provider)];
+    for (const provider of chain) {
+      if (provider !== resolved.provider) fallbackUsed = true;
+      await this.probe(provider);
+      const request = this.forProvider(provider, resolved);
+      for (let attempt = 0; ; attempt++) {
+        const result = await this.attempt(provider, request);
+        if (result.success) return this.finish(result, started, retryCount, fallbackUsed);
+        last = result;
+        const retryable = result.errorInfo ? result.errorInfo.retryable : true;
+        const budget = result.errorInfo && SINGLE_RETRY.has(result.errorInfo.code) ? Math.min(1, this.retry.retries) : this.retry.retries;
+        if (!retryable || attempt >= budget) break;
+        if (result.errorInfo?.code === 'ABORTED') break;
+        retryCount++;
+        const delay = retryDelay(attempt + 1, this.retry, result.errorInfo?.retryAfterMs);
+        this.log('warn', `${provider.providerName} failed (${result.errorInfo?.code ?? 'UNKNOWN'}); retry ${attempt + 1}/${this.retry.retries} in ${delay}ms`);
+        try {
+          await sleep(delay, request.signal);
+        } catch (reason) {
+          return this.finish(this.failure(provider, reason, request.modelId), started, retryCount, fallbackUsed);
+        }
       }
+      if (last?.errorInfo?.code === 'ABORTED') break;
+      if (chain.length > 1) this.log('warn', `${provider.providerName} failed (${last?.errorInfo?.code ?? 'UNKNOWN'}: ${last?.error}); trying the next provider`);
+    }
+    return this.finish(last!, started, retryCount, fallbackUsed);
+  }
+
+  /**
+   * The request as a fallback provider should see it. A model id that belongs
+   * to the provider that just failed (`gpt-4o` when OpenAI is down) is dropped
+   * so the fallback answers with its own default model instead of 404ing.
+   */
+  private forProvider(provider: AIProvider, resolved: { provider: AIProvider; request: AIRequest }): AIRequest {
+    const { request } = resolved;
+    if (provider === resolved.provider || !request.modelId) return request;
+    if (provider.isModelSupported(request.modelId)) return request;
+    const owner = guessProvider(request.modelId);
+    if (owner === null || owner === provider.providerId) return request;
+    this.log('warn', `${provider.providerName}: model "${request.modelId}" belongs to ${owner}; using the default model instead`);
+    return { ...request, modelId: undefined };
+  }
+
+  private async attempt(provider: AIProvider, request: AIRequest): Promise<AIResponse> {
+    let result: AIResponse;
+    try {
+      result = await provider.process(request);
+    } catch (error) {
+      return this.failure(provider, error, request.modelId);
+    }
+    if (!result.success && !result.errorInfo) {
+      // Unclassified failure from a custom provider: retried, as 1.x did.
+      result.errorInfo = AIError.from({ message: result.error ?? 'Request failed', provider: provider.providerId, model: request.modelId, retryable: true });
+    }
+    // A JSON answer cut off by maxTokens is unusable; say so instead of handing back half a document.
+    if (result.success && request.jsonMode && result.finishReason === 'length') {
+      const err = AIError.from({
+        message: 'JSON answer truncated by maxTokens',
+        provider: provider.providerId,
+        code: 'TRUNCATED',
+        model: result.modelUsed,
+        hint: 'Raise maxTokens; the answer was cut off before the JSON was complete.',
+        details: result.data,
+      });
+      return { ...result, success: false, error: err.message, errorInfo: err };
     }
     return result;
+  }
+
+  private failure(provider: AIProvider, error: unknown, model?: string): AIResponse {
+    const err = toAIError(error, { provider: provider.providerId, providerName: provider.providerName, model });
+    return { success: false, error: err.message, errorInfo: err, providerId: provider.providerId, modelUsed: model, finishReason: 'error' };
+  }
+
+  private finish(result: AIResponse, started: number, retryCount: number, fallbackUsed: boolean): AIResponse {
+    const durationMs = Math.round(now() - started);
+    return { ...result, durationMs, processingTime: durationMs, retryCount, fallbackUsed };
   }
 
   /**
    * The same call as [process], streamed.
    *
-   * No retry and no fallback provider here, on purpose: by the time a stream
-   * fails the caller has usually shown half an answer already, and silently
-   * restarting on another provider would splice two different answers
-   * together. A failure is thrown for the caller to handle.
+   * Retry and fallback apply only until the first chunk arrives: by then the
+   * caller has usually shown part of an answer, and restarting on another
+   * provider would splice two different answers together. A failure after
+   * that is thrown from the iterator as an `AIError`.
    */
   async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
     await this.ensureInitialized();
+    const started = now();
+    const resolved = this.resolve(request);
+    if (resolved instanceof AIError) throw resolved;
 
-    const provider = this.resolveProvider(request);
-    if (!provider) {
-      throw new Error('No AI providers available');
-    }
-    if (!provider.processStream) {
-      const result = await provider.process(request);
-      if (!result.success) {
-        throw new Error(result.error ?? 'AI request failed');
+    let lastError: AIError | undefined;
+    const chain = [resolved.provider, ...this.fallbacks(resolved.provider)];
+    for (const provider of chain) {
+      await this.probe(provider);
+      const request = this.forProvider(provider, resolved);
+      for (let attempt = 0; ; attempt++) {
+        const gen = provider.processStream
+          ? provider.processStream(request)
+          : this.oneChunk(provider, request);
+        let first: IteratorResult<AIStreamChunk, void>;
+        try {
+          first = await gen.next();
+        } catch (error) {
+          lastError = toAIError(error, { provider: provider.providerId, providerName: provider.providerName, model: request.modelId });
+          if (lastError.code === 'ABORTED') throw lastError;
+          const budget = SINGLE_RETRY.has(lastError.code) ? Math.min(1, this.retry.retries) : this.retry.retries;
+          if (!lastError.retryable || attempt >= budget) break;
+          const delay = retryDelay(attempt + 1, this.retry, lastError.retryAfterMs);
+          this.log('warn', `${provider.providerName} stream failed (${lastError.code}); retry ${attempt + 1}/${this.retry.retries} in ${delay}ms`);
+          await sleep(delay, request.signal);
+          continue;
+        }
+        yield* this.drain(first, gen, provider, started);
+        return;
       }
-      yield {
-        text: result.data ?? '',
-        done: true,
-        modelUsed: result.modelUsed,
-        usage: {
-          promptTokens: result.promptTokens,
-          completionTokens: result.completionTokens,
-          totalTokens: result.tokensUsed,
-        },
-      };
-      return;
     }
-    yield* provider.processStream(request);
+    throw lastError ?? this.noProviders();
+  }
+
+  private async *oneChunk(provider: AIProvider, request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
+    const result = await provider.process(request);
+    if (!result.success) throw result.errorInfo ?? new AIError(result.error ?? 'AI request failed', provider.providerId);
+    if (result.reasoning) yield { text: '', reasoning: result.reasoning, modelUsed: result.modelUsed };
+    yield {
+      text: result.data ?? '',
+      done: true,
+      modelUsed: result.modelUsed,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      requestId: result.requestId,
+    };
+  }
+
+  /** Relays chunks, stamping timings on the `done` chunk and classifying anything thrown. */
+  private async *drain(
+    first: IteratorResult<AIStreamChunk, void>,
+    gen: AsyncGenerator<AIStreamChunk, void, void>,
+    provider: AIProvider,
+    started: number
+  ): AsyncGenerator<AIStreamChunk, void, void> {
+    let ttft: number | undefined;
+    let r = first;
+    try {
+      while (!r.done) {
+        const chunk = r.value;
+        if (ttft === undefined && chunk.text) ttft = Math.round(now() - started);
+        if (chunk.done) {
+          yield { ...chunk, durationMs: Math.round(now() - started), timeToFirstTokenMs: ttft };
+        } else {
+          yield chunk;
+        }
+        r = await gen.next();
+      }
+    } catch (error) {
+      throw toAIError(error, { provider: provider.providerId, providerName: provider.providerName });
+    } finally {
+      await gen.return?.(undefined).catch(() => undefined);
+    }
   }
 
   getAvailableProviders(): string[] {
@@ -172,7 +389,7 @@ export class AIFactory {
     return Array.from(this.providers.values());
   }
 
-  /** First provider that supports the given model, or null. */
+  /** First provider that lists the given model, or null. */
   getProviderForModel(modelId: string): AIProvider | null {
     for (const p of this.providers.values()) {
       if (p.isModelSupported(modelId)) return p;
@@ -192,11 +409,10 @@ export class AIFactory {
   /** Test each registered provider; returns map of providerId -> ok. */
   async testProviders(): Promise<Record<string, boolean>> {
     await this.ensureInitialized();
-    const out: Record<string, boolean> = {};
-    for (const [id, p] of this.providers) {
-      out[id] = await p.testConnection();
-    }
-    return out;
+    const entries = await Promise.all(
+      Array.from(this.providers.entries()).map(async ([id, p]) => [id, await p.testConnection()] as const)
+    );
+    return Object.fromEntries(entries);
   }
 
   /** Runs provider discovery if it has not run yet. */

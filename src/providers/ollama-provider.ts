@@ -1,5 +1,8 @@
-import { AIRequest, AIResponse, AIStreamChunk } from '../types/index.js';
-import { BaseProvider, buildChatMessages, streamLines } from './base-provider.js';
+import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
+import type { Refinement } from '../core/errors.js';
+import { BaseProvider, buildChatMessages, totalTokens } from './base-provider.js';
+import { parseNDJSON } from '../core/http.js';
+import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
 import {
   runOllamaCLI,
   isOllamaCLIAvailable,
@@ -8,7 +11,7 @@ import {
 } from '../ollama-cli.js';
 
 /** Optional configuration for OllamaProvider */
-export interface OllamaProviderConfig {
+export interface OllamaProviderConfig extends BaseProviderConfig {
   /** Path to the ollama executable (default: "ollama" from PATH) */
   ollamaExecutablePath?: string;
   /** Base URL for Ollama API (default: "http://localhost:11434"). Used for list, ps, show, pull, rm, run when server is reachable. */
@@ -19,13 +22,17 @@ export interface OllamaProviderConfig {
 
 export class OllamaProvider extends BaseProvider {
   private readonly ollamaExecutablePath: string;
-  private readonly baseURL: string;
+  private readonly base: string;
   private readonly preferCLI: boolean;
 
+  protected get baseURL(): string {
+    return this.base;
+  }
+
   constructor(config: OllamaProviderConfig = {}) {
-    super();
+    super(config);
     this.ollamaExecutablePath = config.ollamaExecutablePath ?? 'ollama';
-    this.baseURL = config.baseURL ?? 'http://localhost:11434';
+    this.base = config.baseURL ?? 'http://localhost:11434';
     this.preferCLI = config.preferCLI ?? false;
   }
 
@@ -67,7 +74,8 @@ export class OllamaProvider extends BaseProvider {
   /** Pull a model (API: POST /api/pull, fallback: `ollama pull <model>`). */
   async pull(model: string, options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const result = await this.tryApi(() => this.http(`${this.baseURL}/api/pull`, { body: { model, stream: false } }));
+      // A pull downloads gigabytes; the default 30 s JSON timeout must not cut it off.
+      const result = await this.tryApi(() => this.http(`${this.base}/api/pull`, { body: { model, stream: false }, timeout: 0 }));
       if (result !== null) return this.apiResult(true, result);
     }
     return this.runCommand('pull', [model], options);
@@ -76,7 +84,7 @@ export class OllamaProvider extends BaseProvider {
   /** List models (API: GET /api/tags, fallback: `ollama ls`). */
   async list(options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const result = await this.tryApi(() => this.http(`${this.baseURL}/api/tags`));
+      const result = await this.tryApi(() => this.http(`${this.base}/api/tags`));
       if (result !== null) return this.apiResult(true, result);
     }
     return this.runCommand('ls', [], options);
@@ -86,7 +94,7 @@ export class OllamaProvider extends BaseProvider {
   async rm(model: string, options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
       const ok = await this.tryApi(async () => {
-        await this.http(`${this.baseURL}/api/delete`, { method: 'DELETE', body: { model } });
+        await this.http(`${this.base}/api/delete`, { method: 'DELETE', body: { model } });
         return true;
       });
       if (ok === true) return this.apiResult(true, { status: 'success' });
@@ -101,7 +109,7 @@ export class OllamaProvider extends BaseProvider {
   ): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
       const result = await this.tryApi(() =>
-        this.http(`${this.baseURL}/api/show`, { body: { model, verbose: options.modelfile } })
+        this.http(`${this.base}/api/show`, { body: { model, verbose: options.modelfile } })
       );
       if (result !== null) return this.apiResult(true, result);
     }
@@ -115,7 +123,7 @@ export class OllamaProvider extends BaseProvider {
   async run(model: string, prompt?: string, options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI && prompt !== undefined && prompt !== '') {
       const result = await this.tryApi(async () => {
-        const res = await this.http(`${this.baseURL}/api/generate`, { body: { model, prompt, stream: false } });
+        const res = await this.http(`${this.base}/api/generate`, { body: { model, prompt, stream: false } });
         return res?.response ?? res;
       });
       if (result !== null) {
@@ -130,7 +138,7 @@ export class OllamaProvider extends BaseProvider {
   /** List running models (API: GET /api/ps, fallback: `ollama ps`). */
   async ps(options: OllamaCLIOptions = {}): Promise<OllamaCLIResult> {
     if (!this.preferCLI) {
-      const result = await this.tryApi(() => this.http(`${this.baseURL}/api/ps`));
+      const result = await this.tryApi(() => this.http(`${this.base}/api/ps`));
       if (result !== null) return this.apiResult(true, result);
     }
     return this.runCommand('ps', [], options);
@@ -158,18 +166,14 @@ export class OllamaProvider extends BaseProvider {
 
   async discoverModels(): Promise<string[]> {
     try {
-      const response = await this.http(`${this.baseURL}/api/tags`);
+      const response = await this.http(`${this.base}/api/tags`);
 
       const models = response.models || [];
-      this._supportedModels = models.map((model: { name: string }) => model.name);
-
-      return this._supportedModels;
+      return this.setDiscovered(models.map((model: { name: string }) => model.name));
     } catch {
       const cliResult = await this.list();
       if (cliResult.ok && cliResult.stdout) {
-        const names = this.parseListOutput(cliResult.stdout);
-        this._supportedModels = names;
-        return names;
+        return this.setDiscovered(this.parseListOutput(cliResult.stdout));
       }
       return [];
     }
@@ -191,7 +195,7 @@ export class OllamaProvider extends BaseProvider {
 
   async testConnection(): Promise<boolean> {
     try {
-      await this.http(`${this.baseURL}/api/tags`);
+      await this.http(`${this.base}/api/tags`);
       return true;
     } catch {
       const cli = await this.list();
@@ -199,99 +203,128 @@ export class OllamaProvider extends BaseProvider {
     }
   }
 
+  protected classify(_status: number, json: any, text: string): Refinement {
+    const message: string = typeof json?.error === 'string' ? json.error : text;
+    if (/not found|no such model/i.test(message)) {
+      const m = /model ['"]?([^'"\s]+)['"]? not found/i.exec(message)?.[1];
+      return { code: 'MODEL_NOT_FOUND', hint: `Run \`ollama pull ${m ?? '<model>'}\` and try again.` };
+    }
+    if (/context length|too many tokens|exceeds/i.test(message)) return { code: 'CONTEXT_LENGTH' };
+    if (/out of memory|cuda|runner process/i.test(message)) return { code: 'SERVER' };
+    return {};
+  }
+
+  private resolveModel(request: AIRequest): string | undefined {
+    return request.modelId ?? this.supportedModels[0];
+  }
+
+  private noModel(): AIResponse {
+    return this.fail(
+      this.error('NO_MODEL', 'No Ollama model available', {
+        hint: 'Pull one (`ollama pull llama3.1`) or pass modelId.',
+      })
+    );
+  }
+
+  private chatBody(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
+    return {
+      model,
+      messages: buildChatMessages(request),
+      stream,
+      think: request.reasoning ?? false,
+      ...(request.jsonMode && { format: 'json' }),
+      options: {
+        temperature: request.temperature ?? 0.7,
+        ...(request.maxTokens !== undefined && { num_predict: request.maxTokens }),
+      },
+    };
+  }
+
+  /** A mid-stream `{"error": ...}` line, classified like an HTTP error body. */
+  private lineError(message: string, model: string) {
+    const refined = this.classify(0, { error: message }, message);
+    return this.error(refined.code ?? 'SERVER', message, { model, hint: refined.hint });
+  }
+
   /**
    * Ollama's `/api/chat` with `stream: true`, which answers in NDJSON: one
    * JSON object per line, the last carrying `done` and the token counts.
    */
   async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
-    const modelToUse = request.modelId ?? this.supportedModels[0];
-    const stream = await this.httpStream(`${this.baseURL}/api/chat`, {
-      body: {
-        model: modelToUse,
-        messages: buildChatMessages(request),
-        stream: true,
-        ...(request.jsonMode && { format: 'json' }),
-        options: {
-          temperature: request.temperature ?? 0.7,
-          ...(request.maxTokens !== undefined && { num_predict: request.maxTokens })
-        }
-      },
-      // The 30s default would kill a cold model load or a stall mid-stream.
-      timeout: 0,
-      signal: request.signal,
-    });
+    const model = this.resolveModel(request);
+    if (!model) throw this.noModel().errorInfo;
+    let stream: AsyncIterable<Uint8Array>;
+    try {
+      stream = await this.httpStream(`${this.base}/api/chat`, {
+        body: this.chatBody(request, model, true),
+        ...this.requestOptions(request),
+      });
+    } catch (error) {
+      throw this.toError(error, model);
+    }
 
-    for await (const line of streamLines(stream)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let parsed: any;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        continue;
+    // Models that inline <think> tags instead of using the `thinking` field.
+    const think = new ThinkFilter();
+    try {
+      for await (const parsed of parseNDJSON(stream)) {
+        if (typeof parsed?.error === 'string') throw this.lineError(parsed.error, model);
+        const thinking = parsed?.message?.thinking;
+        if (typeof thinking === 'string' && thinking.length > 0) {
+          yield { text: '', reasoning: thinking, modelUsed: model };
+        }
+        const content = parsed?.message?.content;
+        if (typeof content === 'string' && content.length > 0) {
+          const part = think.push(content);
+          if (part.reasoning) yield { text: '', reasoning: part.reasoning, modelUsed: model };
+          if (part.text) yield { text: part.text, modelUsed: model };
+        }
+        if (parsed?.done) {
+          const tail = think.flush();
+          if (tail.reasoning) yield { text: '', reasoning: tail.reasoning, modelUsed: model };
+          if (tail.text) yield { text: tail.text, modelUsed: model };
+          const promptTokens = parsed.prompt_eval_count;
+          const completionTokens = parsed.eval_count;
+          yield {
+            text: '',
+            done: true,
+            modelUsed: model,
+            finishReason: doneReason(parsed.done_reason),
+            usage: { promptTokens, completionTokens, totalTokens: totalTokens(promptTokens, completionTokens) },
+          };
+        }
       }
-      if (typeof parsed?.error === 'string') {
-        throw new Error(parsed.error);
-      }
-      const content = parsed?.message?.content;
-      if (typeof content === 'string' && content.length > 0) {
-        yield { text: content, modelUsed: modelToUse };
-      }
-      if (parsed?.done) {
-        const promptTokens = parsed.prompt_eval_count;
-        const completionTokens = parsed.eval_count;
-        yield {
-          text: '',
-          done: true,
-          modelUsed: modelToUse,
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens:
-              promptTokens !== undefined && completionTokens !== undefined
-                ? promptTokens + completionTokens
-                : undefined,
-          },
-        };
-      }
+    } catch (error) {
+      throw this.toError(error, model);
     }
   }
 
   async process(request: AIRequest): Promise<AIResponse> {
+    const model = this.resolveModel(request);
+    if (!model) return this.noModel();
     try {
-      const modelToUse = request.modelId ?? this.supportedModels[0];
-
-      const messages = buildChatMessages(request);
-      const response = await this.http(`${this.baseURL}/api/chat`, { body: {
-        model: modelToUse,
-        messages,
-        stream: false,
-        ...(request.jsonMode && { format: 'json' }),
-        options: {
-          temperature: request.temperature ?? 0.7,
-          ...(request.maxTokens !== undefined && { num_predict: request.maxTokens })
-        }
-      } });
-
-      const content = response.message?.content ?? '';
-      const promptTokens = response.prompt_eval_count;
-      const completionTokens = response.eval_count;
-      return this.createResponse(
-        true,
-        content,
-        undefined,
-        request.modelId ?? modelToUse,
-        {
-          promptTokens,
-          completionTokens,
-          totalTokens:
-            promptTokens !== undefined && completionTokens !== undefined
-              ? promptTokens + completionTokens
-              : undefined
-        }
-      );
+      const response = await this.http(`${this.base}/api/chat`, {
+        body: this.chatBody(request, model, false),
+        ...this.requestOptions(request),
+      });
+      if (typeof response?.error === 'string') return this.fail(this.lineError(response.error, model), model);
+      const promptTokens = response?.prompt_eval_count;
+      const completionTokens = response?.eval_count;
+      const split = splitThinkTags(response?.message?.content ?? '');
+      const thinking = typeof response?.message?.thinking === 'string' ? response.message.thinking : '';
+      return this.ok(split.text, {
+        reasoning: [thinking, split.reasoning].filter(Boolean).join('\n') || undefined,
+        modelUsed: response?.model ?? model,
+        finishReason: doneReason(response?.done_reason),
+        usage: { promptTokens, completionTokens, totalTokens: totalTokens(promptTokens, completionTokens) },
+      });
     } catch (error) {
-      this.handleError(error, 'Ollama processing');
+      return this.fail(this.toError(error, model), model);
     }
   }
+}
+
+function doneReason(raw: unknown): FinishReason {
+  if (raw === 'stop') return 'stop';
+  if (raw === 'length') return 'length';
+  return 'unknown';
 }

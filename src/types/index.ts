@@ -1,9 +1,16 @@
+import type { AIError } from '../core/errors.js';
+import type { RetryOptions } from '../core/retry.js';
+import type { FetchLike } from '../core/http.js';
+
+export { AIError } from '../core/errors.js';
+export type { AIErrorCode } from '../core/errors.js';
+
 // Core AI Provider Interface
 export interface AIProvider {
   readonly providerId: string;
   readonly providerName: string;
   readonly supportedModels: string[];
-  
+
   process(request: AIRequest): Promise<AIResponse>;
   /**
    * The same completion, delivered as it is written.
@@ -18,6 +25,9 @@ export interface AIProvider {
   discoverModels(): Promise<string[]>;
 }
 
+/** Why the model stopped writing. `length` means it hit `maxTokens`. */
+export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown';
+
 /**
  * One piece of a streamed answer.
  *
@@ -27,9 +37,19 @@ export interface AIProvider {
  */
 export interface AIStreamChunk {
   text: string;
+  /** Thinking written since the previous chunk, when the model exposes it. `text` is empty on such chunks. */
+  reasoning?: string;
   done?: boolean;
   usage?: TokenUsage;
   modelUsed?: string;
+  /** On the `done` chunk. */
+  finishReason?: FinishReason;
+  /** On the `done` chunk, when the provider sends one. */
+  requestId?: string;
+  /** On the `done` chunk: wall time for the whole stream (set by the factory). */
+  durationMs?: number;
+  /** On the `done` chunk: ms until the first non-empty text chunk (set by the factory). */
+  timeToFirstTokenMs?: number;
 }
 
 // Base AI Request Interface
@@ -47,6 +67,21 @@ export interface AIRequest {
   metadata?: Record<string, any>;
   /** Aborts an in-flight request/stream. */
   signal?: AbortSignal;
+  /** Whole-request timeout in ms for non-streaming calls (default 30000; 0 disables). */
+  timeout?: number;
+  /** Streaming: ms of upstream silence before the stream fails with `STREAM_IDLE` (default 60000; 0 disables). */
+  streamIdleTimeout?: number;
+  /**
+   * Ask a reasoning model to think before answering (Ollama `think`,
+   * Anthropic extended thinking, Gemini `includeThoughts`). The thinking text
+   * comes back as `reasoning` on the response and as `reasoning` deltas on
+   * stream chunks, never mixed into `text`. Off by default for Ollama, where a
+   * model that thinks into its output budget otherwise returns an empty answer;
+   * whatever an OpenAI-format server sends (`reasoning_content`, inline
+   * `<think>` tags) is surfaced regardless of this flag.
+   */
+  reasoning?: boolean;
+  /** @deprecated Unused; removed in 2.0. */
   usageContext?: {
     taskType: 'content-generation' | 'analysis' | 'conversation' | 'code-generation' | 'custom';
     priority: 'low' | 'medium' | 'high';
@@ -59,25 +94,42 @@ export interface AIRequest {
 export interface AIResponse {
   success: boolean;
   data?: string;
+  /** The model's thinking, when it exposed any. Never part of `data`. */
+  reasoning?: string;
+  /** The provider's own message when `success` is false. `errorInfo` has the classification. */
   error?: string;
+  /** Structured error when `success` is false. */
+  errorInfo?: AIError;
   modelUsed?: string;
   providerId?: string;
-  /** Total tokens billed, when the provider reports them. */
+  finishReason?: FinishReason;
+  usage?: TokenUsage;
+  /** Total tokens billed, when the provider reports them. Same as `usage.totalTokens`. */
   tokensUsed?: number;
-  /** Input tokens, when the provider reports them separately. */
+  /** Input tokens, when the provider reports them separately. Same as `usage.promptTokens`. */
   promptTokens?: number;
-  /** Output tokens, when the provider reports them separately. */
+  /** Output tokens, when the provider reports them separately. Same as `usage.completionTokens`. */
   completionTokens?: number;
-  cost?: number;
-  processingTime?: number;
-  modelCapabilities?: string[];
-  suggestedImprovements?: string[];
-  confidence?: number;
-  // Additional metadata for complete data
+  /** Provider request id header, when sent. */
   requestId?: string;
-  timestamp?: Date;
+  /** Wall time of the whole call, including retries and fallback. */
+  durationMs?: number;
+  /** @deprecated Same value as `durationMs`; removed in 2.0. */
+  processingTime?: number;
+  /** Retries spent before this answer. */
   retryCount?: number;
+  /** True when a fallback provider answered. */
   fallbackUsed?: boolean;
+  /** @deprecated Never computed; removed in 2.0. */
+  cost?: number;
+  /** @deprecated Never computed; removed in 2.0. */
+  modelCapabilities?: string[];
+  /** @deprecated Never computed; removed in 2.0. */
+  suggestedImprovements?: string[];
+  /** @deprecated Never computed; removed in 2.0. */
+  confidence?: number;
+  /** @deprecated Removed in 2.0. */
+  timestamp?: Date;
 }
 
 /** Token counts as reported by a provider. Fields are absent when unreported. */
@@ -85,6 +137,8 @@ export interface TokenUsage {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  /** Prompt tokens served from the provider's cache, when reported. */
+  cachedTokens?: number;
 }
 
 // Conversation History
@@ -94,7 +148,7 @@ export interface ConversationHistory {
   timestamp?: Date;
 }
 
-// AI Provider Configuration
+/** @deprecated Unused; removed in 2.0. */
 export interface AIProviderConfig {
   defaultModel?: string;
   defaultTemperature?: number;
@@ -110,26 +164,58 @@ export interface Logger {
   error?(message: string, ...args: unknown[]): void;
 }
 
+/**
+ * `eager` (default): probe every provider in parallel on first use and keep
+ * those that answer. `lazy`: register all, probe a provider the first time a
+ * request lands on it. `none`: never probe; rely on `modelId` and seeded models.
+ */
+export type DiscoveryMode = 'eager' | 'lazy' | 'none';
+
 // AI Factory Configuration (constructor options)
 export interface AIFactoryConfig {
   /** Preferred provider when no modelId is specified */
   defaultProvider?: string;
   /** Fallback provider if default fails */
   fallbackProvider?: string;
+  /** Fallback providers, tried in order after `fallbackProvider`. */
+  fallbackProviders?: string[];
   /** Order of providers to try when no default/model match (first available wins) */
   providerOrder?: string[];
   /** Optional logger; if not set, no logging */
   logger?: Logger;
   /** Custom provider instances; if set, only these are used (no built-in list) */
   providers?: AIProvider[];
-  /** Max retries per request on failure (default 0). */
+  /** Max retries per request on a retryable failure (default 2). Shorthand for `retry.retries`. */
   retries?: number;
+  /** Backoff settings; see `RetryOptions`. */
+  retry?: RetryOptions;
+  discover?: DiscoveryMode;
+  /** Default whole-request timeout (ms) for non-streaming calls; per-request `timeout` wins. */
+  timeout?: number;
+  /** Default idle timeout (ms) for streams; per-request `streamIdleTimeout` wins. */
+  streamIdleTimeout?: number;
+}
+
+/** Options every built-in provider accepts. */
+export interface BaseProviderConfig {
+  /** Origin of the API, without a trailing slash. */
+  baseURL?: string;
+  /** Sent on every request, after the provider's own headers. */
+  headers?: Record<string, string>;
+  /** Default whole-request timeout (ms) for this provider's JSON calls. */
+  timeout?: number;
+  /** Default idle timeout (ms) for this provider's streams. */
+  streamIdleTimeout?: number;
+  /** Seed the supported-model list so no discovery call is needed. */
+  models?: string[];
+  /** Custom `fetch` (proxy agent, tracing, tests). */
+  fetch?: FetchLike;
 }
 
 // Provider Types
 export type ProviderType = 'openai' | 'anthropic' | 'ollama' | 'lmstudio' | 'gemini' | 'custom';
 
-// Provider Configuration
+/** @deprecated Unused; removed in 2.0. */
 export interface ProviderConfig {
   type: ProviderType;
   config: {
@@ -145,7 +231,7 @@ export interface ProviderConfig {
   };
 }
 
-// Predefined Task Types
+/** @deprecated Unused; removed in 2.0. */
 export interface ContentGenerationRequest extends AIRequest {
   taskType: 'content-generation';
   contentType: 'article' | 'blog' | 'email' | 'social-media' | 'documentation';
@@ -153,12 +239,14 @@ export interface ContentGenerationRequest extends AIRequest {
   targetAudience?: string;
 }
 
+/** @deprecated Unused; removed in 2.0. */
 export interface AnalysisRequest extends AIRequest {
   taskType: 'analysis';
   analysisType: 'sentiment' | 'summary' | 'classification' | 'extraction';
   outputFormat?: 'text' | 'json' | 'structured';
 }
 
+/** @deprecated Unused; removed in 2.0. */
 export interface CodeGenerationRequest extends AIRequest {
   taskType: 'code-generation';
   language: string;
@@ -167,13 +255,14 @@ export interface CodeGenerationRequest extends AIRequest {
   includeComments?: boolean;
 }
 
+/** @deprecated Unused; removed in 2.0. */
 export interface ConversationRequest extends AIRequest {
   taskType: 'conversation';
   conversationType: 'chat' | 'support' | 'tutoring' | 'interview';
   personality?: string;
 }
 
-// Post-processing Utilities
+/** @deprecated Unused; removed in 2.0. */
 export interface PostProcessingOptions {
   extractJson?: boolean;
   formatOutput?: 'markdown' | 'html' | 'plain' | 'json';
@@ -184,30 +273,7 @@ export interface PostProcessingOptions {
   keywordExtraction?: boolean;
 }
 
-// Error codes for programmatic handling
-export type AIErrorCode =
-  | 'NO_API_KEY'
-  | 'NO_PROVIDERS'
-  | 'RATE_LIMIT'
-  | 'NETWORK_ERROR'
-  | 'INVALID_RESPONSE'
-  | 'UNKNOWN';
-
-// Error Types
-export class AIError extends Error {
-  constructor(
-    message: string,
-    public provider: string,
-    public statusCode?: number,
-    public details?: unknown,
-    public code?: AIErrorCode
-  ) {
-    super(message);
-    this.name = 'AIError';
-  }
-}
-
-// Utility Types
+/** @deprecated Unused; removed in 2.0. */
 export interface ModelCapabilities {
   reasoning: 'basic' | 'advanced' | 'expert';
   creativity: 'low' | 'medium' | 'high';
@@ -217,6 +283,7 @@ export interface ModelCapabilities {
   supportedTasks: string[];
 }
 
+/** @deprecated Unused; removed in 2.0. */
 export interface ProcessingMetrics {
   startTime: number;
   endTime: number;

@@ -19,6 +19,11 @@
     "**/tests/unit-tests.ts",
     "**/tests/json-mode-and-usage.test.ts",
     "**/tests/streaming.test.ts",
-    "**/tests/integration-local.ts"
+    "**/tests/integration-local.ts",
+    "**/tests/errors.test.ts",
+    "**/tests/factory.test.ts",
+    "**/tests/http.test.ts",
+    "**/tests/providers-stream.test.ts",
+    "**/tests/reasoning.test.ts"
   ]
 }

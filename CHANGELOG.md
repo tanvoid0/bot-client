@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-13
+
+### Added
+
+- **Reasoning models**: `AIRequest.reasoning` (Ollama `think`, Anthropic extended thinking, Gemini `includeThoughts`); the thinking comes back as `AIResponse.reasoning` and as `reasoning` deltas on `AIStreamChunk`, never mixed into `text`. OpenAI-format `reasoning_content` / `reasoning` fields and inline `<think>` tags are surfaced the same way; a tag split across stream chunks is held back until known (`ThinkFilter`, `splitThinkTags` exported).
+- Fallback drops a `modelId` the fallback provider cannot serve (`gpt-4o` when OpenAI is down) so it answers with its own default model instead of 404ing.
+- `PROVIDER_UNREACHABLE` is retried exactly once (a live server with a full accept backlog refuses like a dead port); a 4xx body naming a rate limit ("too many concurrent requests") classifies as `RATE_LIMIT`; a body whose `error.code` is already an `AIErrorCode` name maps 1:1.
+- Seeded `models` stay first after discovery, so the caller's chosen default remains the default.
+- `examples/demo.mjs`: ten real scenarios against a local Ollama, whose output is what the README "See it run" section shows.
+
+- `AIError` fields: `code`, `hint`, `statusCode`, `providerCode`, `retryable`, `retryAfterMs`, `requestId`; a full `AIErrorCode` taxonomy with per-provider classifiers (`core/errors.ts`).
+- Static model-id routing (`core/catalog.ts`): an explicit `openai/gpt-4o` prefix, then a prefix table (`gpt-`, `claude-`, `gemini-`, Ollama family names) resolves the provider with no network call.
+- `discover: 'eager' | 'lazy' | 'none'` on `AIFactoryConfig`: `'eager'` (default) probes every provider in parallel, `'lazy'` probes on first use, `'none'` never probes.
+- Retry with backoff (`core/retry.ts`): exponential delay with jitter, honours `Retry-After`; `retry: { retries, baseDelayMs, maxDelayMs }` on the factory. `AIResponse.retryCount` and `fallbackUsed` report what happened; `fallbackProviders[]` tried in order after `fallbackProvider`.
+- Real SSE streaming for OpenAI, LM Studio and Anthropic, alongside Gemini and Ollama; one `parseSSE` / `parseNDJSON` in `core/http.ts` shared by every provider.
+- `streamIdleTimeout` (default 60 s): a stream that goes silent fails with `STREAM_IDLE` instead of hanging forever; settable per request, factory or provider.
+- `finishReason`, `durationMs`, `timeToFirstTokenMs`, `requestId`, `usage.cachedTokens` on responses and the stream's `done` chunk.
+- `OpenAICompatibleProvider`: point at any OpenAI-format host (Groq, OpenRouter, DeepSeek, ...) with `{ id, baseURL, apiKey }`; `OpenAIProvider` and `LMStudioProvider` are now thin subclasses of it.
+- `BaseProviderConfig` (`baseURL`, `headers`, `timeout`, `streamIdleTimeout`, `models`, `fetch`) accepted by every built-in provider.
+
+### Changed
+
+- `process()` on every built-in provider now returns a failure response (`{ success: false, error, errorInfo }`) instead of throwing; the factory catches the rest so retry and fallback work on real HTTP failures, not just a missing key.
+- `testConnection()`'s default is now "list models", not a real completion; no more paid call on every process start.
+- `AIError.message` is the provider's own text verbatim; no longer prefixed with "X processing failed:".
+- SSE parsing is spec-correct: a frame is dispatched on the blank line that terminates it, not per `data:` line.
+- Retry defaults to 2 attempts with backoff (was 0, a tight loop with no delay).
+
+### Fixed
+
+- Ollama thinking models returned an empty answer with `finishReason: 'length'` at the default temperature, because the thinking silently consumed the output budget; `think: false` is now sent unless `reasoning: true`.
+- The retry backoff timer was unref'd, so a process with nothing else pending could exit mid-retry.
+
+- Provider discovery ran sequentially and probed every provider on the first call, so a single request could wait through five timeouts; discovery is now parallel and probe-only.
+- Every process start sent a real, billed generation to Anthropic just to check the connection.
+- `modelId: 'claude-…'` never routed to Anthropic (`discoverModels` returned nothing), so it silently fell through to the wrong provider; static routing fixes this without a network call.
+- Real provider failures (rate limit, 5xx, network) skipped `retries` and `fallbackProvider` entirely because the factory never caught the throw; both now work.
+- The retry loop retried non-retryable failures (missing key, 400, 401) with no delay between attempts.
+- `AIError.code` and `statusCode` were never populated, and `Retry-After`, the request id and the provider's own error type were dropped; callers could not branch on error kind.
+- OpenAI, Anthropic and LM Studio "streamed" as a single chunk holding the whole answer.
+- Streams had no idle timeout; a stalled upstream hung forever unless the caller aborted.
+- `processingTime` and `confidence` were hard-coded fake metrics on every response.
+- Gemini streaming silently skipped frames it could not parse, and a `SAFETY` / `MAX_TOKENS` finish reported as a normal success even with a truncated or blocked answer.
+- Ollama `process()` with no models loaded sent `model: undefined`, producing an opaque upstream error instead of `NO_MODEL`.
+
+### Deprecated
+
+- `AIResponse.processingTime` (use `durationMs`), `.confidence`, `.cost`, `.modelCapabilities`, `.suggestedImprovements`, `.timestamp`.
+- `AIRequest.usageContext`.
+- `AIProviderConfig`, `ProviderConfig`, `ContentGenerationRequest`, `AnalysisRequest`, `CodeGenerationRequest`, `ConversationRequest`, `PostProcessingOptions`, `ModelCapabilities`, `ProcessingMetrics`: unused, removed in 2.0.
+
+---
+
 ## [1.6.0] - 2026-09-13
 
 ### Changed

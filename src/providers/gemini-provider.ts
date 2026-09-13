@@ -1,7 +1,10 @@
-import { AIRequest, AIResponse, AIStreamChunk } from '../types/index.js';
-import { BaseProvider, buildChatMessages, streamLines } from './base-provider.js';
+import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
+import type { Refinement } from '../core/errors.js';
+import { BaseProvider, buildChatMessages } from './base-provider.js';
+import { parseSSE } from '../core/http.js';
 
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com';
+const DEFAULT_BASE = 'https://generativelanguage.googleapis.com';
+const DEFAULT_MODEL = 'gemini-2.0-flash';
 
 /**
  * Generous by default: structured replies (plans, tool calls) truncate
@@ -9,43 +12,54 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com';
  */
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 
-export interface GeminiProviderConfig {
+export interface GeminiProviderConfig extends BaseProviderConfig {
   apiKey?: string;
+  /** Origin; defaults to generativelanguage.googleapis.com. */
+  baseURL?: string;
+}
+
+const BLOCKED = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY']);
+
+function finishReason(raw: unknown): FinishReason {
+  if (raw === 'STOP') return 'stop';
+  if (raw === 'MAX_TOKENS') return 'length';
+  if (typeof raw === 'string' && BLOCKED.has(raw)) return 'content_filter';
+  if (raw === 'MALFORMED_FUNCTION_CALL') return 'error';
+  return 'unknown';
+}
+
+function usageOf(meta: any): TokenUsage | undefined {
+  if (!meta) return undefined;
+  return {
+    promptTokens: meta.promptTokenCount,
+    completionTokens: meta.candidatesTokenCount,
+    totalTokens: meta.totalTokenCount,
+    ...(meta.cachedContentTokenCount !== undefined && { cachedTokens: meta.cachedContentTokenCount }),
+  };
+}
+
+/** Answer text and, when `includeThoughts` was on, the thought parts (`thought: true`) separately. */
+function textOf(candidate: any): { text: string; reasoning: string } {
+  const parts = candidate?.content?.parts;
+  if (!Array.isArray(parts)) return { text: '', reasoning: '' };
+  let text = '';
+  let reasoning = '';
+  for (const p of parts) {
+    if (typeof p?.text !== 'string') continue;
+    if (p.thought === true) reasoning += p.text;
+    else text += p.text;
+  }
+  return { text, reasoning };
 }
 
 export class GeminiProvider extends BaseProvider {
-  private apiKey?: string;
+  private readonly apiKey?: string;
+  private readonly base: string;
 
-  constructor(config?: GeminiProviderConfig) {
-    super();
-    this.apiKey = config?.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.BOT_CLIENT_GEMINI_KEY;
-  }
-
-  async testConnection(): Promise<boolean> {
-    if (!this.apiKey) return false;
-    try {
-      await this.http(`${GEMINI_BASE}/v1beta/models`, { params: { key: this.apiKey } });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async discoverModels(): Promise<string[]> {
-    if (!this.apiKey) return [];
-
-    try {
-      const response = await this.http(`${GEMINI_BASE}/v1beta/models`, { params: { key: this.apiKey } });
-
-      const models = response.models || [];
-      this._supportedModels = models
-        .filter((model: any) => model.name.includes('gemini'))
-        .map((model: any) => model.name.split('/').pop());
-
-      return this._supportedModels;
-    } catch (error) {
-      return [];
-    }
+  constructor(config: GeminiProviderConfig = {}) {
+    super(config);
+    this.apiKey = config.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.BOT_CLIENT_GEMINI_KEY;
+    this.base = (config.baseURL ?? DEFAULT_BASE).replace(/\/+$/, '');
   }
 
   get providerId(): string {
@@ -56,6 +70,55 @@ export class GeminiProvider extends BaseProvider {
     return 'Google Gemini';
   }
 
+  protected get baseURL(): string {
+    return this.base;
+  }
+
+  async testConnection(): Promise<boolean> {
+    if (!this.apiKey) return false;
+    try {
+      await this.http(`${this.base}/v1beta/models`, { params: { key: this.apiKey, pageSize: '1' } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async discoverModels(): Promise<string[]> {
+    if (!this.apiKey) return [];
+    try {
+      const response = await this.http(`${this.base}/v1beta/models`, { params: { key: this.apiKey } });
+      const models = response?.models ?? [];
+      return this.setDiscovered(
+        models
+          .filter((m: { name?: string }) => typeof m.name === 'string' && m.name.includes('gemini'))
+          .map((m: { name: string }) => m.name.split('/').pop() as string)
+      );
+    } catch {
+      return this._supportedModels;
+    }
+  }
+
+  protected classify(_status: number, json: any): Refinement {
+    const status: string | undefined = json?.error?.status;
+    const message: string = json?.error?.message ?? '';
+    const details: any[] = Array.isArray(json?.error?.details) ? json.error.details : [];
+    const reason = details.find((d) => typeof d?.reason === 'string')?.reason;
+    const retryDelay = details.find((d) => typeof d?.retryDelay === 'string')?.retryDelay;
+    const out: Refinement = { providerCode: reason ?? status };
+    if (reason === 'API_KEY_INVALID' || status === 'UNAUTHENTICATED') out.code = 'AUTH';
+    else if (status === 'PERMISSION_DENIED') out.code = 'PERMISSION';
+    else if (status === 'RESOURCE_EXHAUSTED') out.code = 'RATE_LIMIT';
+    else if (status === 'NOT_FOUND') out.code = 'MODEL_NOT_FOUND';
+    else if (status === 'UNAVAILABLE') out.code = 'OVERLOADED';
+    else if (status === 'INTERNAL') out.code = 'SERVER';
+    else if (status === 'DEADLINE_EXCEEDED') out.code = 'TIMEOUT';
+    else if (status === 'INVALID_ARGUMENT')
+      out.code = /token|context|too long|input.*large/i.test(message) ? 'CONTEXT_LENGTH' : 'INVALID_REQUEST';
+    const seconds = typeof retryDelay === 'string' ? Number(retryDelay.replace(/s$/, '')) : NaN;
+    if (Number.isFinite(seconds)) out.retryAfterMs = seconds * 1000;
+    return out;
+  }
 
   /** The request body both the one-shot and the streaming call send. */
   private buildBody(request: AIRequest): Record<string, unknown> {
@@ -68,7 +131,7 @@ export class GeminiProvider extends BaseProvider {
       } else {
         contents.push({
           role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
+          parts: [{ text: m.content }],
         });
       }
     }
@@ -78,10 +141,9 @@ export class GeminiProvider extends BaseProvider {
         maxOutputTokens: request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: request.temperature ?? 0.7,
         ...(request.jsonMode && { responseMimeType: 'application/json' }),
-        ...(request.responseSchema !== undefined && {
-          responseSchema: request.responseSchema
-        })
-      }
+        ...(request.responseSchema !== undefined && { responseSchema: request.responseSchema }),
+        ...(request.reasoning && { thinkingConfig: { includeThoughts: true } }),
+      },
     };
     if (systemParts.length > 0) {
       body.systemInstruction = { parts: systemParts };
@@ -89,81 +151,108 @@ export class GeminiProvider extends BaseProvider {
     return body;
   }
 
+  private resolveModel(request: AIRequest): string {
+    return request.modelId ?? this.supportedModels[0] ?? DEFAULT_MODEL;
+  }
+
+  /** A 200 reply can still carry a refusal: no candidates and a `promptFeedback.blockReason`. */
+  private blocked(data: any, model: string) {
+    const reason = data?.promptFeedback?.blockReason;
+    if (!reason) return null;
+    return this.error('CONTENT_FILTER', `Prompt blocked by Gemini (${reason})`, { model, details: data.promptFeedback });
+  }
+
+  async process(request: AIRequest): Promise<AIResponse> {
+    if (!this.apiKey) return this.fail(this.error('NO_API_KEY', 'Gemini API key required'));
+    const model = this.resolveModel(request);
+    try {
+      const data = await this.http(`${this.base}/v1beta/models/${model}:generateContent`, {
+        params: { key: this.apiKey },
+        body: this.buildBody(request),
+        ...this.requestOptions(request),
+      });
+      const blocked = this.blocked(data, model);
+      if (blocked) return this.fail(blocked, model);
+      const candidate = data?.candidates?.[0];
+      const { text, reasoning } = textOf(candidate);
+      const finish = finishReason(candidate?.finishReason);
+      if (finish === 'content_filter' && !text) {
+        return this.fail(
+          this.error('CONTENT_FILTER', `Answer blocked by Gemini (${candidate?.finishReason})`, {
+            model,
+            details: candidate?.safetyRatings,
+          }),
+          model
+        );
+      }
+      return this.ok(text, {
+        reasoning: reasoning || undefined,
+        modelUsed: data?.modelVersion ?? model,
+        finishReason: finish,
+        usage: usageOf(data?.usageMetadata),
+      });
+    } catch (error) {
+      return this.fail(this.toError(error, model), model);
+    }
+  }
+
   /**
    * Gemini's `streamGenerateContent`, read as server-sent events.
    *
    * Same body as [process] -- system instruction, JSON mode and schema all
    * travel unchanged -- so a streamed answer is the same answer, delivered in
-   * pieces. A chunk that does not parse is skipped rather than thrown on: it
-   * is a half-written frame, and the next read completes it.
+   * pieces. A frame that does not parse is skipped rather than thrown on.
    */
   async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
-    if (!this.apiKey) {
-      throw new Error('Gemini API key required');
-    }
-    const modelId = request.modelId ?? this.supportedModels[0] ?? 'gemini-2.0-flash';
-    const stream = await this.httpStream(`${GEMINI_BASE}/v1beta/models/${modelId}:streamGenerateContent`, {
-      params: { key: this.apiKey, alt: 'sse' },
-      body: this.buildBody(request),
-      // The 30s default would kill a cold model load or a stall mid-stream.
-      timeout: 0,
-      signal: request.signal,
-    });
-
-    let usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number } | undefined;
-    for await (const line of streamLines(stream)) {
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === '[DONE]') continue;
-      let parsed: any;
-      try {
-        parsed = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      const parts = parsed?.candidates?.[0]?.content?.parts;
-      if (Array.isArray(parts)) {
-        for (const part of parts) {
-          if (typeof part?.text === 'string' && part.text.length > 0) {
-            yield { text: part.text, modelUsed: modelId };
-          }
-        }
-      }
-      const meta = parsed?.usageMetadata;
-      if (meta) {
-        usage = {
-          promptTokens: meta.promptTokenCount,
-          completionTokens: meta.candidatesTokenCount,
-          totalTokens: meta.totalTokenCount,
-        };
-      }
-    }
-
-    yield { text: '', done: true, modelUsed: modelId, usage };
-  }
-
-  async process(request: AIRequest): Promise<AIResponse> {
-    if (!this.apiKey) {
-      return this.createResponse(false, undefined, 'Gemini API key required');
-    }
-
+    if (!this.apiKey) throw this.error('NO_API_KEY', 'Gemini API key required');
+    const model = this.resolveModel(request);
+    let stream: AsyncIterable<Uint8Array>;
     try {
-      const modelId = request.modelId ?? this.supportedModels[0] ?? 'gemini-2.0-flash';
-      const response = await this.http(`${GEMINI_BASE}/v1beta/models/${modelId}:generateContent`, {
-        params: { key: this.apiKey },
-        body: this.buildBody(request)
-      });
-
-      const content = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      const modelUsed = request.modelId ?? modelId;
-      const usage = response.usageMetadata;
-      return this.createResponse(true, content, undefined, modelUsed, {
-        promptTokens: usage?.promptTokenCount,
-        completionTokens: usage?.candidatesTokenCount,
-        totalTokens: usage?.totalTokenCount
+      stream = await this.httpStream(`${this.base}/v1beta/models/${model}:streamGenerateContent`, {
+        params: { key: this.apiKey, alt: 'sse' },
+        body: this.buildBody(request),
+        ...this.requestOptions(request),
       });
     } catch (error) {
-      this.handleError(error, 'Gemini processing');
+      throw this.toError(error, model);
     }
+
+    let usage: TokenUsage | undefined;
+    let finish: FinishReason | undefined;
+    let wrote = false;
+    let modelUsed = model;
+    try {
+      for await (const { data } of parseSSE(stream)) {
+        if (!data || data === '[DONE]') continue;
+        let parsed: any;
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (parsed?.error) {
+          const refined = this.classify(0, parsed);
+          throw this.error(refined.code ?? 'SERVER', parsed.error.message ?? 'stream error', { model, details: parsed.error });
+        }
+        const blocked = this.blocked(parsed, model);
+        if (blocked) throw blocked;
+        if (typeof parsed?.modelVersion === 'string') modelUsed = parsed.modelVersion;
+        const candidate = parsed?.candidates?.[0];
+        const { text, reasoning } = textOf(candidate);
+        if (reasoning) yield { text: '', reasoning, modelUsed };
+        if (text) {
+          wrote = true;
+          yield { text, modelUsed };
+        }
+        if (candidate?.finishReason) finish = finishReason(candidate.finishReason);
+        if (parsed?.usageMetadata) usage = usageOf(parsed.usageMetadata);
+      }
+    } catch (error) {
+      throw this.toError(error, model);
+    }
+    if (finish === 'content_filter' && !wrote) {
+      throw this.error('CONTENT_FILTER', 'Answer blocked by Gemini', { model });
+    }
+    yield { text: '', done: true, modelUsed, usage, finishReason: finish ?? 'unknown' };
   }
 }

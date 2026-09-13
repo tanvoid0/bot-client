@@ -2,6 +2,8 @@
 export { AIFactory, aiFactory, ensureFactoryReady } from './ai-factory.js';
 
 // Providers (for custom factory or direct use)
+export { OpenAICompatibleProvider } from './providers/openai-compatible.js';
+export type { OpenAICompatibleConfig } from './providers/openai-compatible.js';
 export { OpenAIProvider } from './providers/openai-provider.js';
 export type { OpenAIProviderConfig } from './providers/openai-provider.js';
 export { AnthropicProvider } from './providers/anthropic-provider.js';
@@ -12,11 +14,19 @@ export { LMStudioProvider } from './providers/lmstudio-provider.js';
 export type { LMStudioProviderConfig } from './providers/lmstudio-provider.js';
 export { OllamaProvider } from './providers/ollama-provider.js';
 export type { OllamaProviderConfig } from './providers/ollama-provider.js';
+export { BaseProvider, buildChatMessages } from './providers/base-provider.js';
 export {
   runOllamaCLI,
   isOllamaCLIAvailable
 } from './ollama-cli.js';
 export type { OllamaCLIResult, OllamaCLIOptions } from './ollama-cli.js';
+
+// Wire-format helpers (for custom providers)
+export { HttpError, streamLines, parseSSE, parseNDJSON } from './core/http.js';
+export type { HttpOptions, SseEvent, FetchLike } from './core/http.js';
+export { guessProvider } from './core/catalog.js';
+export { splitThinkTags, ThinkFilter } from './core/reasoning.js';
+export type { RetryOptions } from './core/retry.js';
 
 // Types for requests, responses, and configuration
 export type {
@@ -26,6 +36,10 @@ export type {
   AIStreamChunk,
   AIFactoryConfig,
   AIProviderConfig,
+  BaseProviderConfig,
+  DiscoveryMode,
+  FinishReason,
+  TokenUsage,
   Logger,
   ConversationHistory,
   ContentGenerationRequest,
@@ -40,5 +54,5 @@ export type {
 } from './types/index.js';
 
 // Error handling
-export { AIError } from './types/index.js';
-export type { AIErrorCode } from './types/index.js';
+export { AIError, toAIError, isRetryableCode } from './core/errors.js';
+export type { AIErrorCode, AIErrorInit, Refinement, ClassifyContext } from './core/errors.js';

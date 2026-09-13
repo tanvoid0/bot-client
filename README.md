@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@tanvoid0/bot-client.svg)](https://www.npmjs.com/package/@tanvoid0/bot-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+). One request shape for every provider, with **streaming**, **JSON mode** and **abort** where the provider supports them. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
+Multi-provider AI client: OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, and any OpenAI-compatible API via `OpenAICompatibleProvider`. Zero-config for local; API keys for cloud. **Zero runtime dependencies** (native `fetch`, Node 18+). One request shape for every provider, with **real streaming** on all five, **typed provider errors** (a code and a hint, the provider's own message never rewritten), **retries with backoff**, a **stream idle timeout**, and `finishReason` on every response. Model routing is static: `modelId: 'claude-sonnet-4-5'` reaches Anthropic with no discovery call, and an explicit `openai/gpt-4o` prefix always wins. Includes **Ollama API + CLI** (pull, list, rm, show, ps, run) and an **npx CLI** for models and API keys.
 
 ---
 
@@ -30,20 +30,20 @@ With **Ollama** running locally, this works without API keys. For cloud provider
 
 ## Streaming
 
-`processStream` yields the answer as it is written. Each chunk's `text` is the delta since the previous chunk — append, don't replace. The last chunk has `done: true` and, when the provider reports it, token `usage` for the whole call.
+`processStream` yields the answer as it is written, over real SSE (OpenAI, LM Studio, Anthropic, Gemini) or NDJSON (Ollama). Each chunk's `text` is the delta since the previous chunk, so a consumer appends rather than replaces. The last chunk carries `done: true`, `finishReason`, `usage` (when the provider reports it), `durationMs` (wall time for the whole stream) and `timeToFirstTokenMs`.
 
 ```typescript
 import { aiFactory } from '@tanvoid0/bot-client';
 
 for await (const chunk of aiFactory.processStream({ prompt: 'Count to twenty.' })) {
   process.stdout.write(chunk.text);
-  if (chunk.done) console.log('\n', chunk.usage); // { promptTokens, completionTokens, totalTokens }
+  if (chunk.done) console.log('\n', chunk.finishReason, chunk.usage, `${chunk.durationMs}ms`);
 }
 ```
 
-Gemini (SSE) and Ollama (NDJSON) stream for real. The other providers fall back to one chunk holding the full answer, so the loop above works everywhere — it just arrives all at once.
+A stalled upstream fails the stream with `STREAM_IDLE` after `streamIdleTimeout` ms of silence, default 60 s. Set it per request (`{ streamIdleTimeout: 20_000 }`), per factory (`new AIFactory({ streamIdleTimeout })`) or per provider (`new OpenAIProvider({ streamIdleTimeout })`); the clock resets on every byte, so a slow-but-alive stream never trips it.
 
-Streaming calls have **no socket timeout** (a cold model load can take longer than 30 s to first token). Cancel with an `AbortSignal` instead:
+Cancel early with an `AbortSignal`:
 
 ```typescript
 const abort = new AbortController();
@@ -59,13 +59,13 @@ try {
 }
 ```
 
-Breaking out of the `for await` also closes the upstream connection. A provider error mid-stream (non-2xx, or an Ollama `{"error"}` line) throws from the loop rather than ending it as success.
+Breaking out of the `for await` also closes the upstream connection. A provider error mid-stream throws `AIError` from the loop rather than ending the stream as a success; retry and fallback only apply before the first chunk arrives (see [Retries and fallback](#retries-and-fallback)).
 
 ---
 
 ## JSON mode
 
-`jsonMode: true` asks the provider for JSON output using its native mechanism (Gemini `responseMimeType`, Ollama `format: 'json'`, OpenAI `response_format`). Parse the result yourself; the client returns the raw string.
+`jsonMode: true` asks the provider for JSON output. OpenAI, LM Studio and any `OpenAICompatibleProvider` use the native `response_format: { type: 'json_object' }`; Gemini uses `responseMimeType`; Ollama uses `format: 'json'`. Anthropic has no native JSON mode, so `jsonMode` adds one line to the system prompt asking for a bare JSON value instead; it is a request, not an API-enforced constraint. Parse the result yourself; the client returns the raw string.
 
 ```typescript
 const res = await aiFactory.process({
@@ -75,7 +75,135 @@ const res = await aiFactory.process({
 const { fruits } = JSON.parse(res.data!);
 ```
 
-`responseSchema` is passed through only where the provider accepts one (Gemini today) and in that provider's own dialect — it is not translated between providers.
+`responseSchema` is passed through only where the provider accepts one (Gemini today) and in that provider's own dialect; it is not translated between providers.
+
+---
+
+## Reasoning models
+
+`reasoning: true` lets a thinking model think. The thinking comes back as `reasoning` on the response and as `reasoning` deltas on stream chunks. It is never mixed into `text`.
+
+```typescript
+for await (const chunk of aiFactory.processStream({ prompt: 'Is 91 prime?', modelId: 'gemma4', reasoning: true })) {
+  if (chunk.reasoning) process.stderr.write(chunk.reasoning); // the model's thinking
+  process.stdout.write(chunk.text);                            // the answer
+}
+```
+
+| Provider | `reasoning: true` sends | Thinking read from |
+|---|---|---|
+| Ollama | `think: true` (`think: false` otherwise) | `message.thinking`, or inline `<think>` tags |
+| Anthropic | `thinking: { type: 'enabled', budget_tokens }`, temperature 1 | `thinking` content blocks / `thinking_delta` events |
+| Gemini | `thinkingConfig.includeThoughts` | parts marked `thought: true` |
+| OpenAI-compatible (DeepSeek, vLLM, llama.cpp, OpenRouter, LM Studio) | nothing extra | `reasoning_content` or `reasoning` on the message or delta, or inline `<think>` tags |
+
+Ollama defaults to `think: false`. Left on, a thinking model can spend its whole `maxTokens` on thinking and hand back an empty answer with `finishReason: 'length'`. An inline `<think>` tag split across two stream chunks is held back until it is known to be a tag, so no tag text leaks into `text`.
+
+---
+
+## Errors
+
+Every provider failure becomes an `AIError`: a classified `code`, the provider's own `message` verbatim, and a one-line `hint` saying what to do next.
+
+```typescript
+class AIError extends Error {
+  code: AIErrorCode;
+  provider: string;
+  message: string;        // the provider's own text, never rewritten
+  hint?: string;          // one sentence: what to do next
+  statusCode?: number;    // HTTP status, when the failure was an HTTP reply
+  providerCode?: string;  // the provider's own error type/code, verbatim
+  retryable: boolean;
+  retryAfterMs?: number;  // from Retry-After or the provider body
+  requestId?: string;     // provider request id header, when sent
+  model?: string;
+}
+```
+
+<details>
+<summary><strong>AIErrorCode</strong></summary>
+
+```typescript
+type AIErrorCode =
+  // not retryable: fix credentials or the account
+  | 'NO_API_KEY' | 'AUTH' | 'PERMISSION' | 'QUOTA'
+  // retryable: transient on the provider or network side
+  | 'RATE_LIMIT' | 'OVERLOADED' | 'SERVER' | 'NETWORK' | 'TIMEOUT' | 'STREAM_IDLE'
+  // caller cancelled
+  | 'ABORTED'
+  // fix the request
+  | 'MODEL_NOT_FOUND' | 'CONTEXT_LENGTH' | 'INVALID_REQUEST' | 'UNSUPPORTED'
+  // output problems
+  | 'CONTENT_FILTER' | 'TRUNCATED' | 'INVALID_JSON' | 'SCHEMA_MISMATCH'
+  // setup problems
+  | 'PROVIDER_UNREACHABLE' | 'NO_PROVIDERS' | 'NO_MODEL'
+  | 'TOOL_ERROR' | 'MCP_ERROR'
+  | 'INVALID_RESPONSE' | 'UNKNOWN';
+```
+</details>
+
+`process()` never throws for a provider failure; it returns `{ success: false, error, errorInfo }`:
+
+```typescript
+const res = await aiFactory.process({ prompt: 'Hello', modelId: 'gpt-4o' });
+if (!res.success) {
+  switch (res.errorInfo?.code) {
+    case 'NO_API_KEY':
+    case 'MODEL_NOT_FOUND':
+    case 'PROVIDER_UNREACHABLE':
+      console.error(res.errorInfo.hint);
+      break;
+    case 'RATE_LIMIT':
+    case 'OVERLOADED':
+      // already retried automatically; this is the final failure
+      break;
+    default:
+      console.error(String(res.errorInfo));
+  }
+}
+```
+
+`String(error)` renders the code and message with the hint appended:
+
+```
+[openai/RATE_LIMIT] Rate limit reached — Retry after 20s, or lower the request rate; retried automatically when retry is enabled.
+```
+
+`generate()` throws the `AIError` instead of returning a failure response. `processStream()` throws it from the iterator once a stream has failed.
+
+---
+
+## Retries and fallback
+
+Retryable codes (`RATE_LIMIT`, `OVERLOADED`, `SERVER`, `NETWORK`, `TIMEOUT`, `STREAM_IDLE`) are retried automatically with exponential backoff and jitter, honouring a provider's `Retry-After` when it sends one. Everything else (`NO_API_KEY`, `AUTH`, `MODEL_NOT_FOUND`, `INVALID_REQUEST`, ...) fails immediately, since retrying a bad request or a missing key only wastes a call.
+
+```typescript
+const factory = new AIFactory({
+  retry: { retries: 2, baseDelayMs: 500, maxDelayMs: 8000 }, // defaults
+  fallbackProviders: ['anthropic', 'ollama'],
+});
+```
+
+Defaults: 2 retries, 500 ms base delay, doubling each attempt up to 8 s, plus or minus 20% jitter. `retries: 0` opts out. `fallbackProvider` (single id) and `fallbackProviders` (array, tried in order after it) both work; a fallback is tried once retries on the current provider are exhausted, or immediately for `NO_API_KEY`, `MODEL_NOT_FOUND` and `PROVIDER_UNREACHABLE`.
+
+Every response carries `retryCount` (attempts spent before this answer) and `fallbackUsed` (true when a fallback provider answered), so a success that took retries is still visible to the caller.
+
+Streaming rule: retry and fallback only run before the first chunk arrives. Once text has reached the caller, a mid-stream failure throws instead of restarting on another provider, which would splice two different answers together.
+
+---
+
+## Performance
+
+| Metric | Value |
+|---|---|
+| Per-call overhead above raw `fetch` (p50 / p99) | below noise: within 0.2 ms / 1 ms of a bare `fetch` + `res.json()` |
+| Streaming overhead per chunk | 7.6 µs per yielded chunk |
+| Memory for a 1 MB streamed answer | flat (about 0.3 MB heap delta; chunks are yielded, never accumulated) |
+| Cold import of the core entry | 9.8 ms median, zero network calls |
+| First-request network calls with `discover: 'lazy'` and a routable `modelId` | 1 (the completion itself) |
+| Published size (`.` entry, minified, gz) | 13.5 kB (`OpenAICompatibleProvider` alone: 6.1 kB) |
+
+Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
 
 ---
 
@@ -174,10 +302,10 @@ import { AIFactory } from '@tanvoid0/bot-client';
 
 const factory = new AIFactory({
   defaultProvider: 'ollama',
-  fallbackProvider: 'openai',
+  fallbackProviders: ['openai'],
   providerOrder: ['ollama', 'lmstudio', 'openai'],
   logger: { info: console.log, warn: console.warn, error: console.error },
-  retries: 1
+  retry: { retries: 1 },
 });
 await factory.ready();
 const text = await factory.generate('Hello');
@@ -196,6 +324,42 @@ const factory = new AIFactory({
   defaultProvider: 'ollama'
 });
 ```
+</details>
+
+<details>
+<summary><strong>Discovery</strong></summary>
+
+`discover` controls when a provider's model list is fetched, and never sends a paid generation to do it:
+
+- `'eager'` (default): every candidate provider is probed in parallel on first use; only those that answer are kept. Probing lists models (`GET /models` or equivalent), so init costs one cheap call per provider, not a completion.
+- `'lazy'`: every candidate provider is registered up front; a provider is probed only the first time a request resolves to it.
+- `'none'`: never probes; routing relies on `modelId` (explicit prefix or the static catalog) and any `models` seeded in the provider's config.
+
+```typescript
+const factory = new AIFactory({ discover: 'lazy' });
+```
+
+`testConnection()` (used during eager discovery and by `testProviders()`) lists models instead of sending a real completion.
+</details>
+
+<details>
+<summary><strong>Any OpenAI-compatible API</strong></summary>
+
+Point `OpenAICompatibleProvider` at any server that speaks the OpenAI chat-completions dialect: Groq, OpenRouter, DeepSeek, Mistral, xAI, Together, vLLM, and more.
+
+```typescript
+import { AIFactory, OpenAICompatibleProvider } from '@tanvoid0/bot-client';
+
+const groq = new OpenAICompatibleProvider({
+  id: 'groq',
+  baseURL: 'https://api.groq.com/openai/v1',
+  apiKey: process.env.GROQ_API_KEY,
+});
+
+const factory = new AIFactory({ providers: [groq] });
+```
+
+Thin presets (`GroqProvider`, `OpenRouterProvider`, ...) ship in 1.8; today `OpenAICompatibleProvider` covers all of them with one line of config.
 </details>
 
 <details>
@@ -242,14 +406,173 @@ const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => pr
 <details>
 <summary><strong>Types</strong></summary>
 
-- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `jsonMode?`, `responseSchema?`, `signal?` (`AbortSignal`), `metadata?`, `usageContext?`
-- **AIResponse**: `success`, `data?`, `error?`, `modelUsed?`, `providerId?`, `processingTime?`, `tokensUsed?`, `promptTokens?`, `completionTokens?`, `cost?`
-- **AIStreamChunk**: `text` (delta), `done?`, `usage?` (`TokenUsage`), `modelUsed?`
-- **TokenUsage**: `promptTokens?`, `completionTokens?`, `totalTokens?`
-- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `providerOrder?`, `logger?`, `providers?`, `retries?`
+- **AIRequest**: `prompt`, `modelId?`, `temperature?`, `maxTokens?`, `systemPrompt?`, `history?`, `jsonMode?`, `responseSchema?`, `signal?` (`AbortSignal`), `timeout?` (whole request, ms, default 30000), `streamIdleTimeout?` (ms of upstream silence before a stream fails, default 60000), `metadata?`, `reasoning?` (let a thinking model think; see [Reasoning models](#reasoning-models))
+- **AIResponse**: `success`, `data?`, `error?`, `errorInfo?` (`AIError`, set when `success` is false), `finishReason` (`'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown'`), `usage?` (`TokenUsage`), `modelUsed?`, `providerId?`, `requestId?`, `durationMs`, `retryCount`, `fallbackUsed`
+- **AIStreamChunk**: `text` (delta), `done?`, `usage?`, `modelUsed?`, `finishReason?` (on the done chunk), `requestId?` (on the done chunk), `durationMs?` (on the done chunk), `timeToFirstTokenMs?` (on the done chunk) `reasoning?` (thinking delta; `text` is empty on such chunks)
+- **TokenUsage**: `promptTokens?`, `completionTokens?`, `totalTokens?`, `cachedTokens?`
+- **AIFactoryConfig**: `defaultProvider?`, `fallbackProvider?`, `fallbackProviders?`, `providerOrder?`, `logger?`, `providers?`, `retries?` (shorthand for `retry.retries`), `retry?` (`{ retries?, baseDelayMs?, maxDelayMs? }`), `discover?` (`'eager' | 'lazy' | 'none'`), `timeout?`, `streamIdleTimeout?`
+- **BaseProviderConfig**: accepted by every built-in provider constructor: `baseURL?`, `headers?`, `timeout?`, `streamIdleTimeout?`, `models?` (seeds the supported list, skips discovery), `fetch?` (custom `fetch`, for proxies or tests)
+- **OpenAICompatibleProvider config**: `BaseProviderConfig` plus `id?`, `name?`, `apiKey?`, `modelFilter?`, `defaultModel?`, `defaultMaxTokens?`, `requireApiKey?`, `streamUsage?`, `apiKeyEnv?`
 - **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
-- **AIError**: `message`, `provider`, `statusCode?`, `details?`, `code?` (e.g. `NO_API_KEY`, `RATE_LIMIT`)
+- **AIError**: see [Errors](#errors)
 - **AIProvider**: interface for custom providers; implement `providerId`, `providerName`, `supportedModels`, `process`, `isModelSupported`, `testConnection`, `discoverModels`; `processStream` is optional (the factory falls back to one chunk from `process`)
+- Deprecated, removed in 2.0: `AIResponse.confidence`, `.processingTime` (use `.durationMs`), `.cost`, `.modelCapabilities`, `.suggestedImprovements`, `.timestamp`
+</details>
+
+---
+
+## See it run
+
+`node examples/demo.mjs` runs the scenarios below against a local Ollama. The output here is copied from a real run (Ollama, `gemma4:latest`, no API keys set), not typed by hand.
+
+<details>
+<summary><strong>1. Zero config</strong></summary>
+
+```typescript
+const text = await aiFactory.generate('In one short sentence, what is a mutex?', { modelId: 'gemma4:latest', maxTokens: 60 });
+```
+
+```
+A mutex is a synchronization primitive used to ensure that only one thread can access a shared resource at any given time.
+```
+</details>
+
+<details>
+<summary><strong>2. Streaming with timings</strong></summary>
+
+```typescript
+for await (const chunk of aiFactory.processStream({ prompt: 'Count from 1 to 5, comma separated.', modelId: 'gemma4:latest' })) {
+  process.stdout.write(chunk.text);
+  if (chunk.done) console.log(chunk);
+}
+```
+
+```
+1, 2, 3, 4, 5
+{ finishReason: 'stop', usage: { promptTokens: 20, completionTokens: 14, totalTokens: 34 }, timeToFirstTokenMs: 39, durationMs: 120 }
+```
+</details>
+
+<details>
+<summary><strong>3. JSON mode</strong></summary>
+
+```typescript
+const res = await aiFactory.process({ prompt: 'Give three primary colours as {"colours": string[]}.', modelId: 'gemma4:latest', jsonMode: true });
+console.log(res.data, JSON.parse(res.data));
+```
+
+```
+{"colours": ["red", "yellow", "blue"]}
+{ colours: [ 'red', 'yellow', 'blue' ] }
+```
+</details>
+
+<details>
+<summary><strong>4. Reasoning</strong></summary>
+
+```typescript
+for await (const chunk of aiFactory.processStream({ prompt: 'Is 91 prime? Answer yes or no with one reason.', modelId: 'gemma4:latest', reasoning: true })) {
+  if (chunk.reasoning) thought += chunk.reasoning; else answer += chunk.text;
+}
+```
+
+```
+reasoning: Thinking Process:
+
+1.  **Analyze the request:** The user asks "Is 91 prime?" and requires the answer to be "yes or no" with "one reason."
+2.  **Define "prime nu…
+text:      No, because 91 is divisible by 7 (91 = 7 * 13).
+usage:     { promptTokens: 30, completionTokens: 342, totalTokens: 372 }
+```
+</details>
+
+<details>
+<summary><strong>5. Model not found</strong></summary>
+
+```typescript
+const res = await aiFactory.process({ prompt: 'hi', modelId: 'llama9:70b' });
+console.log(String(res.errorInfo));
+console.log(res.errorInfo);
+```
+
+```
+[ollama/MODEL_NOT_FOUND] model 'llama9:70b' not found — Run `ollama pull llama9:70b` and try again.
+{
+  code: 'MODEL_NOT_FOUND',
+  provider: 'ollama',
+  message: "model 'llama9:70b' not found",
+  hint: 'Run `ollama pull llama9:70b` and try again.',
+  statusCode: 404,
+  retryable: false,
+  model: 'llama9:70b'
+}
+```
+</details>
+
+<details>
+<summary><strong>6. Provider not running</strong></summary>
+
+```typescript
+const res = await new LMStudioProvider().process({ prompt: 'hi', modelId: 'any' });
+```
+
+```
+[lmstudio/PROVIDER_UNREACHABLE] fetch failed (ECONNREFUSED) — Nothing answered at http://localhost:1234/v1; check that it is running and the baseURL.
+```
+</details>
+
+<details>
+<summary><strong>7. Cloud model, no key</strong></summary>
+
+```typescript
+const res = await aiFactory.process({ prompt: 'hi', modelId: 'gpt-4o' });
+```
+
+```
+[openai/NO_PROVIDERS] Provider "openai" (for model "gpt-4o") is not available: connection test failed (missing or rejected API key, or server not running) — Fix the openai setup, or pick a model from an available provider (ollama).
+```
+</details>
+
+<details>
+<summary><strong>8. Fallback</strong></summary>
+
+A bad OpenAI key fails with `AUTH`, which is not retried; the request moves to Ollama. `gpt-4o` belongs to OpenAI, so the fallback uses its own default model instead of 404ing.
+
+```typescript
+const factory = new AIFactory({
+  providers: [new OpenAIProvider({ apiKey: 'sk-not-a-real-key' }), new OllamaProvider({ models: ['gemma4:latest'] })],
+  discover: 'lazy',
+  fallbackProvider: 'ollama',
+  logger: { warn: console.warn },
+});
+const res = await factory.process({ prompt: 'Say "fallback works" and nothing else.', modelId: 'gpt-4o' });
+```
+
+```
+[warn] OpenAI failed (AUTH: Incorrect API key provided: sk-not-a*****-key. ...); trying the next provider
+[warn] Ollama: model "gpt-4o" belongs to openai; using the default model instead
+{ success: true, providerId: 'ollama', modelUsed: 'gemma4:latest', fallbackUsed: true, retryCount: 0, data: 'fallback works' }
+```
+</details>
+
+<details>
+<summary><strong>9. Abort and timeout</strong></summary>
+
+```typescript
+const abort = new AbortController();
+for await (const chunk of aiFactory.processStream({ prompt: 'Write a long paragraph.', modelId: 'gemma4:latest', signal: abort.signal })) {
+  partial += chunk.text;
+  if (partial.length > 40) abort.abort();
+}
+// throws: { code: 'ABORTED', message: 'This operation was aborted' }   partial has 42 chars
+
+const slow = await aiFactory.process({ prompt: 'Write a long essay.', modelId: 'gemma4:latest', timeout: 50 });
+```
+
+```
+[ollama/TIMEOUT] Request timed out after 50ms — Raise the timeout, or use processStream for long answers.
+retryCount: 2
+```
 </details>
 
 ---
@@ -259,32 +582,26 @@ const result = await runOllamaCLI('pull', ['llama3.1:8b'], { onStderr: (c) => pr
 | Provider | Type | Streams | JSON mode | Notes |
 |---------|------|:-:|:-:|--------|
 | **Ollama** | Local | ✅ | ✅ | API + CLI; list/pull/rm/show/ps/run; tested |
-| **LM Studio** | Local | one chunk | — | localhost:1234; tested |
-| **OpenAI** | Cloud | one chunk | ✅ | API key required |
-| **Anthropic** | Cloud | one chunk | — | API key required |
+| **LM Studio** | Local | ✅ | ✅ | localhost:1234; OpenAI-compatible; tested |
+| **OpenAI** | Cloud | ✅ | ✅ | API key required |
+| **Anthropic** | Cloud | ✅ | ✅ (system-prompt instruction, not native) | API key required |
 | **Gemini** | Cloud | ✅ | ✅ + `responseSchema` | API key required; tested |
 
-"One chunk" means `processStream` works but delivers the whole answer at once.
+All five stream for real: SSE for OpenAI, LM Studio, Anthropic and Gemini; NDJSON for Ollama.
 
-The factory initializes all providers and keeps those that pass the connection test. Use `getProvider('ollama')` (etc.) to use a specific one.
+The factory probes providers per `discover` (default `'eager'`, see [Discovery](#discovery)) and keeps those that pass the connection check. Use `getProvider('ollama')` (etc.) to use a specific one.
 
 ---
 
 ## Troubleshooting
 
-<details>
-<summary><strong>No AI providers available</strong></summary>
+Read `errorInfo.hint` first; it is generated for the specific failure and usually says exactly what to do next.
 
-- **Ollama**: `curl http://localhost:11434/api/tags` or `ollama list`; start with `ollama serve` if needed.
-- **LM Studio**: Ensure a model is loaded and the server is on (e.g. localhost:1234).
-- **Cloud**: Ensure the right env key is set (`BOT_CLIENT_OPENAI_KEY`, etc.).
-</details>
-
-<details>
-<summary><strong>Connection test failed for X</strong></summary>
-
-Normal during init: the client keeps only providers that succeed. Missing API key or stopped local server will show as failed for that provider.
-</details>
+| Code | Hint |
+|---|---|
+| `NO_API_KEY` | Pass `{ apiKey }` to the provider, or set its environment variable. |
+| `PROVIDER_UNREACHABLE` | Nothing answered at the configured `baseURL`; check that it is running. |
+| `MODEL_NOT_FOUND` | The model id is unknown to the provider; check it, or call `discoverModels()` for the list. |
 
 <details>
 <summary><strong>Use a specific provider</strong></summary>

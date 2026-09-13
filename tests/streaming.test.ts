@@ -56,11 +56,11 @@ describe('streamLines', () => {
 describe('GeminiProvider.processStream', () => {
   it('yields text as it arrives and usage at the end', async () => {
     const provider = new GeminiProvider({ apiKey: 'test-key' });
+    // Gemini frames events with CRLF and a blank line; a network read can end mid-frame.
     const fetchMock = stubStream([
-      'data: {"candidates":[{"content":{"parts":[{"text":"Hello "}]}}]}\n',
-      'data: {"candidates":[{"content":{"parts":[{"text":"there"}]}}],',
-      '"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9}}\n',
-      'data: [DONE]\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello "}]}}]}\r\n\r\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"there"}]},"finishReason":"STOP"}],',
+      '"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9}}\r\n\r\n',
     ]);
 
     const controller = new AbortController();
@@ -75,6 +75,7 @@ describe('GeminiProvider.processStream', () => {
     expect(chunks.map((c) => c.text).join('')).toBe('Hello there');
     const last = chunks[chunks.length - 1];
     expect(last.done).toBe(true);
+    expect(last.finishReason).toBe('stop');
     expect(last.usage).toEqual({
       promptTokens: 7,
       completionTokens: 2,
@@ -84,15 +85,18 @@ describe('GeminiProvider.processStream', () => {
     const url = fetchMock.mock.calls[0][0] as URL;
     expect(url.pathname).toContain(':streamGenerateContent');
     expect(url.searchParams.get('alt')).toBe('sse');
-    // No timeout wrapper: the caller's abort signal is passed through as-is.
-    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
+    // The caller's abort reaches the request.
+    const sent = fetchMock.mock.calls[0][1]?.signal as AbortSignal;
+    expect(sent.aborted).toBe(false);
+    controller.abort();
+    expect(sent.aborted).toBe(true);
   });
 
   it('skips a frame that is not JSON rather than failing the answer', async () => {
     const provider = new GeminiProvider({ apiKey: 'test-key' });
     stubStream([
-      'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n',
-      'data: {broken\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\r\n\r\n',
+      'data: {broken\r\n\r\n',
     ]);
 
     const chunks = await collect(provider.processStream({ prompt: 'hi' }));
@@ -115,8 +119,10 @@ describe('OllamaProvider.processStream', () => {
 
     expect(chunks.map((c) => c.text).join('')).toBe('one two');
     expect(chunks[chunks.length - 1].usage?.totalTokens).toBe(8);
-    // No timeout wrapper: the caller's abort signal is passed through as-is.
-    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
+    // The caller's abort reaches the request.
+    const sent = fetchMock.mock.calls[0][1]?.signal as AbortSignal;
+    controller.abort();
+    expect(sent.aborted).toBe(true);
   });
 
   it('throws on a mid-stream error line instead of ending silently', async () => {
@@ -126,7 +132,7 @@ describe('OllamaProvider.processStream', () => {
       '{"error":"model runner crashed"}\n',
     ]);
 
-    await expect(collect(provider.processStream({ prompt: 'hi' }))).rejects.toThrow(
+    await expect(collect(provider.processStream({ prompt: 'hi', modelId: 'gemma4' }))).rejects.toThrow(
       'model runner crashed',
     );
   });

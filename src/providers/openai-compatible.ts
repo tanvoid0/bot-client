@@ -1,0 +1,241 @@
+import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
+import type { Refinement } from '../core/errors.js';
+import { BaseProvider, buildChatMessages, totalTokens } from './base-provider.js';
+import { parseSSE } from '../core/http.js';
+import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
+
+export interface OpenAICompatibleConfig extends BaseProviderConfig {
+  /** Provider id used in routing and errors (`openai`, `groq`, ...). */
+  id?: string;
+  /** Display name. */
+  name?: string;
+  apiKey?: string;
+  /** Origin, with or without `/v1` (`https://api.groq.com/openai/v1`, `http://localhost:1234`). */
+  baseURL?: string;
+  /** Keep only these ids from `GET /models`. Default: keep all. */
+  modelFilter?: (id: string) => boolean;
+  /** Used when the request names no model and discovery found none. */
+  defaultModel?: string;
+  /** `max_tokens` when the request sets none. Default: omit (provider default). */
+  defaultMaxTokens?: number;
+  /** Refuse requests without an API key (cloud APIs). Default false. */
+  requireApiKey?: boolean;
+  /** Send `stream_options: { include_usage: true }` on streams. Default true. */
+  streamUsage?: boolean;
+  /** Environment variables consulted for the key, in order. */
+  apiKeyEnv?: string[];
+}
+
+function finishReason(raw: unknown): FinishReason {
+  switch (raw) {
+    case 'stop':
+      return 'stop';
+    case 'length':
+      return 'length';
+    case 'tool_calls':
+    case 'function_call':
+      return 'tool_calls';
+    case 'content_filter':
+      return 'content_filter';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * Any server speaking the OpenAI chat-completions dialect: OpenAI itself,
+ * LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together, vLLM, ...
+ */
+export class OpenAICompatibleProvider extends BaseProvider {
+  protected readonly apiKey?: string;
+  protected readonly v1: string;
+  private readonly cfg: OpenAICompatibleConfig;
+  private readonly authHeaders: Record<string, string>;
+
+  constructor(config: OpenAICompatibleConfig = {}) {
+    super(config);
+    this.cfg = config;
+    const base = (config.baseURL ?? 'https://api.openai.com').replace(/\/+$/, '');
+    this.v1 = base.endsWith('/v1') ? base : `${base}/v1`;
+    this.apiKey = config.apiKey ?? firstEnv(config.apiKeyEnv);
+    this.authHeaders = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+  }
+
+  get providerId(): string {
+    return this.cfg.id ?? 'openai-compatible';
+  }
+
+  get providerName(): string {
+    return this.cfg.name ?? this.providerId;
+  }
+
+  protected get baseURL(): string {
+    return this.v1;
+  }
+
+  async testConnection(): Promise<boolean> {
+    if (this.cfg.requireApiKey && !this.apiKey) return false;
+    try {
+      await this.http(`${this.v1}/models`, { headers: this.authHeaders });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async discoverModels(): Promise<string[]> {
+    if (this.cfg.requireApiKey && !this.apiKey) return [];
+    try {
+      const response = await this.http(`${this.v1}/models`, { headers: this.authHeaders });
+      const ids: string[] = (response?.data ?? [])
+        .map((m: { id?: string }) => m.id)
+        .filter((id: unknown): id is string => typeof id === 'string');
+      return this.setDiscovered(this.cfg.modelFilter ? ids.filter(this.cfg.modelFilter) : ids);
+    } catch {
+      return this._supportedModels;
+    }
+  }
+
+  protected classify(status: number, json: any): Refinement {
+    const code: string | undefined = json?.error?.code ?? json?.error?.type;
+    const message: string = json?.error?.message ?? '';
+    const out: Refinement = { providerCode: code };
+    if (code === 'insufficient_quota' || code === 'billing_hard_limit_reached') out.code = 'QUOTA';
+    else if (code === 'invalid_api_key' || status === 401) out.code = 'AUTH';
+    else if (code === 'model_not_found' || /model .* (does not exist|not found)/i.test(message)) out.code = 'MODEL_NOT_FOUND';
+    else if (code === 'context_length_exceeded' || /maximum context length|context length|too many tokens/i.test(message))
+      out.code = 'CONTEXT_LENGTH';
+    else if (code === 'rate_limit_exceeded' || status === 429) out.code = 'RATE_LIMIT';
+    else if (code === 'server_error' || code === 'engine_overloaded') out.code = 'OVERLOADED';
+    return out;
+  }
+
+  protected resolveModel(request: AIRequest): string | undefined {
+    return request.modelId ?? this.supportedModels[0] ?? this.cfg.defaultModel;
+  }
+
+  protected body(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
+    const maxTokens = request.maxTokens ?? this.cfg.defaultMaxTokens;
+    return {
+      model,
+      messages: buildChatMessages(request),
+      ...(maxTokens !== undefined && { max_tokens: maxTokens }),
+      temperature: request.temperature ?? 0.7,
+      ...(request.jsonMode && { response_format: { type: 'json_object' } }),
+      ...(stream && { stream: true }),
+      ...(stream && this.cfg.streamUsage !== false && { stream_options: { include_usage: true } }),
+    };
+  }
+
+  private missing(request: AIRequest): AIResponse | null {
+    if (this.cfg.requireApiKey && !this.apiKey) {
+      return this.fail(this.error('NO_API_KEY', `${this.providerName} API key required`));
+    }
+    if (!this.resolveModel(request)) {
+      return this.fail(this.error('NO_MODEL', `No model available on ${this.providerName}`));
+    }
+    return null;
+  }
+
+  async process(request: AIRequest): Promise<AIResponse> {
+    const blocked = this.missing(request);
+    if (blocked) return blocked;
+    const model = this.resolveModel(request)!;
+    try {
+      const { data, headers } = await this.httpFull(`${this.v1}/chat/completions`, {
+        headers: this.authHeaders,
+        body: this.body(request, model, false),
+        ...this.requestOptions(request),
+      });
+      const choice = data?.choices?.[0];
+      const usage = data?.usage;
+      const split = splitThinkTags(choice?.message?.content ?? '');
+      const field = reasoningField(choice?.message);
+      return this.ok(split.text, {
+        reasoning: [field, split.reasoning].filter(Boolean).join('\n') || undefined,
+        modelUsed: data?.model ?? model,
+        finishReason: finishReason(choice?.finish_reason),
+        requestId: headers.get('x-request-id') ?? undefined,
+        usage: usage && {
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens ?? totalTokens(usage.prompt_tokens, usage.completion_tokens),
+          ...(usage.prompt_tokens_details?.cached_tokens !== undefined && {
+            cachedTokens: usage.prompt_tokens_details.cached_tokens,
+          }),
+        },
+      });
+    } catch (error) {
+      return this.fail(this.toError(error, model), model);
+    }
+  }
+
+  async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
+    const blocked = this.missing(request);
+    if (blocked) throw blocked.errorInfo;
+    const model = this.resolveModel(request)!;
+    let stream: AsyncIterable<Uint8Array>;
+    try {
+      stream = await this.httpStream(`${this.v1}/chat/completions`, {
+        headers: this.authHeaders,
+        body: this.body(request, model, true),
+        ...this.requestOptions(request),
+      });
+    } catch (error) {
+      throw this.toError(error, model);
+    }
+
+    let finish: FinishReason | undefined;
+    let usage: AIStreamChunk['usage'];
+    let modelUsed = model;
+    const think = new ThinkFilter();
+    try {
+      for await (const { data } of parseSSE(stream)) {
+        if (data === '[DONE]') break;
+        let frame: any;
+        try {
+          frame = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (frame?.error) throw this.error('UNKNOWN', frame.error.message ?? 'stream error', { model, details: frame.error });
+        if (typeof frame?.model === 'string') modelUsed = frame.model;
+        const choice = frame?.choices?.[0];
+        const thinking = reasoningField(choice?.delta);
+        if (thinking) yield { text: '', reasoning: thinking, modelUsed };
+        const text = choice?.delta?.content;
+        if (typeof text === 'string' && text.length > 0) {
+          const part = think.push(text);
+          if (part.reasoning) yield { text: '', reasoning: part.reasoning, modelUsed };
+          if (part.text) yield { text: part.text, modelUsed };
+        }
+        if (choice?.finish_reason) finish = finishReason(choice.finish_reason);
+        if (frame?.usage) {
+          usage = {
+            promptTokens: frame.usage.prompt_tokens,
+            completionTokens: frame.usage.completion_tokens,
+            totalTokens: frame.usage.total_tokens ?? totalTokens(frame.usage.prompt_tokens, frame.usage.completion_tokens),
+          };
+        }
+      }
+    } catch (error) {
+      throw this.toError(error, model);
+    }
+    const tail = think.flush();
+    if (tail.reasoning) yield { text: '', reasoning: tail.reasoning, modelUsed };
+    if (tail.text) yield { text: tail.text, modelUsed };
+    yield { text: '', done: true, modelUsed, usage, finishReason: finish ?? 'unknown' };
+  }
+}
+
+/** DeepSeek, vLLM and llama.cpp use `reasoning_content`; OpenRouter and LM Studio use `reasoning`. */
+function reasoningField(message: any): string {
+  const v = message?.reasoning_content ?? message?.reasoning;
+  return typeof v === 'string' ? v : '';
+}
+
+function firstEnv(names?: string[]): string | undefined {
+  if (!names || typeof process === 'undefined' || !process.env) return undefined;
+  for (const n of names) if (process.env[n]) return process.env[n];
+  return undefined;
+}

@@ -1,9 +1,32 @@
-import { StringDecoder } from 'node:string_decoder';
-import { AIProvider, AIRequest, AIResponse, AIError, AIStreamChunk, TokenUsage } from '../types/index.js';
+import type {
+  AIProvider,
+  AIRequest,
+  AIResponse,
+  AIStreamChunk,
+  TokenUsage,
+  FinishReason,
+  BaseProviderConfig,
+} from '../types/index.js';
+import { AIError, toAIError, type AIErrorCode, type Refinement, type ClassifyContext } from '../core/errors.js';
+import {
+  httpJson,
+  httpStream as rawHttpStream,
+  HttpError,
+  streamLines,
+  parseSSE,
+  parseNDJSON,
+  type HttpOptions,
+  type HttpResult,
+} from '../core/http.js';
+
+export { HttpError, streamLines, parseSSE, parseNDJSON };
+export type { HttpOptions, HttpResult };
+
+export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 /** Build OpenAI-style messages array from request (systemPrompt + history + current prompt). */
-export function buildChatMessages(request: AIRequest): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
-  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+export function buildChatMessages(request: AIRequest): ChatMessage[] {
+  const messages: ChatMessage[] = [];
   if (request.systemPrompt) {
     messages.push({ role: 'system', content: request.systemPrompt });
   }
@@ -18,58 +41,38 @@ export function buildChatMessages(request: AIRequest): Array<{ role: 'system' | 
   return messages;
 }
 
-const DEFAULT_TIMEOUT_MS = 30000;
-
-export interface HttpOptions {
-  method?: 'GET' | 'POST' | 'DELETE';
-  /** JSON-serialised. Presence makes the default method POST. */
-  body?: unknown;
-  headers?: Record<string, string>;
-  params?: Record<string, string>;
-  signal?: AbortSignal;
-  /** Whole-request timeout in ms; 0 disables it (streams). Default 30000. */
-  timeout?: number;
+/** Sum of prompt and completion tokens when both are known. */
+export function totalTokens(promptTokens?: number, completionTokens?: number): number | undefined {
+  return promptTokens !== undefined && completionTokens !== undefined ? promptTokens + completionTokens : undefined;
 }
 
-/** A non-2xx reply. `json` is the parsed body when it was JSON, so `handleError` can lift the API's own message. */
-export class HttpError extends Error {
-  readonly json: any;
-  constructor(readonly status: number, readonly body: string) {
-    super(`HTTP ${status}${body ? `: ${body.slice(0, 200)}` : ''}`);
-    this.name = 'HttpError';
-    try {
-      this.json = body ? JSON.parse(body) : undefined;
-    } catch {
-      this.json = undefined;
-    }
-  }
-}
-
-/** Caller's signal, aborted early by the timeout too. Passes the caller's signal through untouched when there is no timeout. */
-function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
-  if (timeoutMs <= 0) return signal;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs);
-  timer.unref?.();
-  if (signal) {
-    if (signal.aborted) controller.abort(signal.reason);
-    else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
-  }
-  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
-  return controller.signal;
+export interface OkExtra {
+  reasoning?: string;
+  modelUsed?: string;
+  usage?: TokenUsage;
+  finishReason?: FinishReason;
+  requestId?: string;
 }
 
 export abstract class BaseProvider implements AIProvider {
   protected _supportedModels: string[] = [];
+  protected readonly baseConfig: BaseProviderConfig;
 
-  constructor() {
-    // Simple initialization
+  constructor(config: BaseProviderConfig = {}) {
+    this.baseConfig = config;
+    if (config.models) this._supportedModels = [...config.models];
   }
 
   abstract get providerId(): string;
   abstract get providerName(): string;
   abstract process(request: AIRequest): Promise<AIResponse>;
   abstract discoverModels(): Promise<string[]>;
+
+  /** Origin this provider talks to; shown in `PROVIDER_UNREACHABLE` hints. */
+  protected get baseURL(): string | undefined {
+    return this.baseConfig.baseURL;
+  }
+
   /**
    * Streams a completion. The default runs the ordinary [process] and hands
    * back its answer as a single chunk, so every provider can be *consumed* as
@@ -79,23 +82,27 @@ export abstract class BaseProvider implements AIProvider {
   async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
     const response = await this.process(request);
     if (!response.success) {
-      throw new Error(response.error ?? `${this.providerId} returned no response`);
+      throw response.errorInfo ?? this.error('UNKNOWN', response.error ?? `${this.providerId} returned no response`);
     }
+    if (response.reasoning) yield { text: '', reasoning: response.reasoning, modelUsed: response.modelUsed };
     yield {
       text: response.data ?? '',
       done: true,
       modelUsed: response.modelUsed,
-      usage: {
-        promptTokens: response.promptTokens,
-        completionTokens: response.completionTokens,
-        totalTokens: response.tokensUsed,
-      },
+      usage: response.usage,
+      finishReason: response.finishReason,
+      requestId: response.requestId,
     };
   }
 
-
-
   get supportedModels(): string[] {
+    return this._supportedModels;
+  }
+
+  /** Records what discovery found, keeping any seeded `models` first so the caller's chosen default stays the default. */
+  protected setDiscovered(ids: string[]): string[] {
+    const seed = this.baseConfig.models ?? [];
+    this._supportedModels = Array.from(new Set([...seed, ...ids]));
     return this._supportedModels;
   }
 
@@ -103,53 +110,119 @@ export abstract class BaseProvider implements AIProvider {
     return this.supportedModels.includes(modelId);
   }
 
+  /** Cheap by default: "up" means at least one model can be listed. No generation is sent. */
   async testConnection(): Promise<boolean> {
     try {
-      const response = await this.process({ prompt: 'Hello', maxTokens: 10 });
-      const hasData = response.data === '' || (typeof response.data === 'string' && response.data.length > 0);
-      return response.success && hasData;
+      return (await this.discoverModels()).length > 0;
     } catch {
       return false;
     }
   }
 
-  /** JSON request on the global `fetch`. Non-2xx throws [HttpError]; the JSON body (if any) is on `.json`. */
+  // ---- errors -------------------------------------------------------------
+
+  /**
+   * Provider-specific reading of an error body. Return the fields you can
+   * tell from it (`code`, `providerCode`, `hint`, `retryAfterMs`); the status
+   * code default fills the rest.
+   */
+  protected classify(_status: number, _json: any, _text: string): Refinement {
+    return {};
+  }
+
+  protected errorContext(model?: string): ClassifyContext {
+    return {
+      provider: this.providerId,
+      providerName: this.providerName,
+      model,
+      baseURL: this.baseURL,
+      refine: (status, json, text) => this.classify(status, json, text),
+    };
+  }
+
+  /** Any thrown value → `AIError` carrying this provider's classification. */
+  protected toError(error: unknown, model?: string): AIError {
+    return toAIError(error, this.errorContext(model));
+  }
+
+  /** A fresh `AIError` for a failure this provider detects itself (no key, no model, blocked answer). */
+  protected error(code: AIErrorCode, message: string, extra: { model?: string; hint?: string; details?: unknown } = {}): AIError {
+    return toAIError(
+      AIError.from({ message, provider: this.providerId, code, model: extra.model, hint: extra.hint, details: extra.details }),
+      this.errorContext(extra.model)
+    );
+  }
+
+  /** Throws the classified `AIError`. Kept for subclasses written against 1.x. */
+  protected handleError(error: unknown, _operation?: string): never {
+    throw this.toError(error);
+  }
+
+  // ---- http ---------------------------------------------------------------
+
+  /** JSON request. Non-2xx throws [HttpError]; the JSON body (if any) is on `.json`. */
   protected async http<T = any>(url: string, options: HttpOptions = {}): Promise<T> {
-    const res = await this.fetchRaw(url, options);
-    const text = await res.text();
-    return text ? (JSON.parse(text) as T) : (undefined as T);
+    return (await this.httpFull<T>(url, options)).data;
   }
 
-  /** Streaming request: resolves to the body as an async iterable of bytes. Non-2xx throws [HttpError]. */
-  protected async httpStream(url: string, options: HttpOptions = {}): Promise<AsyncIterable<Uint8Array>> {
-    const res = await this.fetchRaw(url, options);
-    if (!res.body) return (async function* () {})();
-    return res.body as unknown as AsyncIterable<Uint8Array>;
+  /** JSON request with the reply's status and headers (request ids live there). */
+  protected httpFull<T = any>(url: string, options: HttpOptions = {}): Promise<HttpResult<T>> {
+    return httpJson<T>(url, this.withDefaults(options));
   }
 
-  private async fetchRaw(url: string, options: HttpOptions): Promise<Response> {
-    const target = new URL(url);
-    for (const [k, v] of Object.entries(options.params ?? {})) target.searchParams.set(k, v);
-    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...options.headers };
-    const res = await fetch(target, {
-      method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-      headers,
-      ...(options.body !== undefined && { body: JSON.stringify(options.body) }),
-      signal: withTimeout(options.signal, options.timeout ?? DEFAULT_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new HttpError(res.status, body);
-    }
-    return res;
+  /** Streaming request: the body as an async iterable of bytes, idle-guarded. Non-2xx throws [HttpError]. */
+  protected httpStream(url: string, options: HttpOptions = {}): Promise<AsyncIterable<Uint8Array>> {
+    return rawHttpStream(url, this.withDefaults(options));
   }
 
-  protected handleError(error: unknown, operation: string): never {
-    const err = error as { json?: { error?: { message?: string } }; message?: string };
-    const message = err.json?.error?.message || err.message || 'Unknown error';
-    throw new AIError(`${operation} failed: ${message}`, this.providerId);
+  private withDefaults(options: HttpOptions): HttpOptions {
+    return {
+      ...options,
+      headers: { ...options.headers, ...this.baseConfig.headers },
+      timeout: options.timeout ?? this.baseConfig.timeout,
+      idleTimeout: options.idleTimeout ?? this.baseConfig.streamIdleTimeout,
+      provider: this.providerId,
+      fetch: options.fetch ?? this.baseConfig.fetch,
+    };
   }
 
+  /** The per-request knobs (`signal`, timeouts) as http options. */
+  protected requestOptions(request: AIRequest): Pick<HttpOptions, 'signal' | 'timeout' | 'idleTimeout'> {
+    return { signal: request.signal, timeout: request.timeout, idleTimeout: request.streamIdleTimeout };
+  }
+
+  // ---- responses ----------------------------------------------------------
+
+  protected ok(data: string, extra: OkExtra = {}): AIResponse {
+    const usage = extra.usage;
+    return {
+      success: true,
+      data,
+      ...(extra.reasoning && { reasoning: extra.reasoning }),
+      modelUsed: extra.modelUsed || this.supportedModels[0] || 'unknown',
+      providerId: this.providerId,
+      finishReason: extra.finishReason ?? 'unknown',
+      ...(extra.requestId && { requestId: extra.requestId }),
+      ...(usage && { usage }),
+      ...(usage?.promptTokens !== undefined && { promptTokens: usage.promptTokens }),
+      ...(usage?.completionTokens !== undefined && { completionTokens: usage.completionTokens }),
+      ...(usage?.totalTokens !== undefined && { tokensUsed: usage.totalTokens }),
+    };
+  }
+
+  protected fail(error: AIError, modelUsed?: string): AIResponse {
+    return {
+      success: false,
+      error: error.message,
+      errorInfo: error,
+      modelUsed: modelUsed ?? error.model ?? this.supportedModels[0] ?? 'unknown',
+      providerId: this.providerId,
+      finishReason: 'error',
+      ...(error.requestId && { requestId: error.requestId }),
+    };
+  }
+
+  /** @deprecated Use `ok()` / `fail()`. Kept for subclasses written against 1.x. */
   protected createResponse(
     success: boolean,
     data?: string,
@@ -157,42 +230,8 @@ export abstract class BaseProvider implements AIProvider {
     modelUsed?: string,
     usage?: TokenUsage
   ): AIResponse {
-    return {
-      success,
-      data,
-      error,
-      modelUsed: modelUsed || this.supportedModels[0] || 'unknown',
-      providerId: this.providerId,
-      processingTime: 0,
-      confidence: success ? 0.8 : 0,
-      ...(usage?.promptTokens !== undefined && { promptTokens: usage.promptTokens }),
-      ...(usage?.completionTokens !== undefined && { completionTokens: usage.completionTokens }),
-      ...(usage?.totalTokens !== undefined && { tokensUsed: usage.totalTokens })
-    };
+    return success
+      ? this.ok(data ?? '', { modelUsed, usage })
+      : this.fail(this.error('UNKNOWN', error ?? 'Request failed', { model: modelUsed }), modelUsed);
   }
-}
-
-/**
- * Splits a byte stream (a `fetch` body, or any async iterable of chunks) into lines.
- *
- * Both streaming APIs frame their chunks by newline -- SSE for Gemini, NDJSON
- * for Ollama -- and neither guarantees a network chunk ends on one, so the
- * tail is carried into the next read rather than parsed as a broken line.
- */
-export async function* streamLines(
-  stream: AsyncIterable<Uint8Array | string>,
-): AsyncGenerator<string, void, void> {
-  let buffer = '';
-  const decoder = new StringDecoder('utf8');
-  for await (const chunk of stream) {
-    buffer += typeof chunk === 'string' ? chunk : decoder.write(chunk);
-    let newline = buffer.indexOf('\n');
-    while (newline !== -1) {
-      yield buffer.slice(0, newline);
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf('\n');
-    }
-  }
-  buffer += decoder.end();
-  if (buffer.trim()) yield buffer;
 }
