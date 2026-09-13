@@ -1,6 +1,6 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, mergeBody, totalTokens } from './base-provider.js';
+import { BaseProvider, buildChatMessages, inlineImage, mergeBody, textOf, totalTokens } from './base-provider.js';
 import { parseNDJSON } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
 import type { runOllamaCLI, OllamaCLIResult, OllamaCLIOptions } from '../ollama-cli.js';
@@ -239,10 +239,26 @@ export class OllamaProvider extends BaseProvider {
   }
 
   private chatBody(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
+    const messages = buildChatMessages(request).map((m) => {
+      if (typeof m.content === 'string') return m;
+      const images = m.content
+        .filter((p): p is Extract<typeof p, { type: 'image' }> => p.type === 'image')
+        .map((p) => {
+          const inline = inlineImage(p);
+          if (!inline) {
+            throw this.error('UNSUPPORTED', 'Ollama takes image bytes, not URLs', {
+              model,
+              hint: 'Fetch the image yourself and pass { type: "image", data: bytes } or a data: URL.',
+            });
+          }
+          return inline.data;
+        });
+      return { role: m.role, content: textOf(m.content), ...(images.length && { images }) };
+    });
     return mergeBody(
       {
         model,
-        messages: buildChatMessages(request),
+        messages,
         stream,
         think: request.reasoning ?? false,
         ...(request.jsonMode && { format: 'json' }),

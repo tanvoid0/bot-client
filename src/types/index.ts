@@ -52,9 +52,33 @@ export interface AIStreamChunk {
   timeToFirstTokenMs?: number;
 }
 
+export interface TextPart {
+  type: 'text';
+  text: string;
+}
+
+/** An image for a vision model: a remote `url`, a `data:` URL, or raw bytes / base64 in `data`. */
+export interface ImagePart {
+  type: 'image';
+  url?: string;
+  data?: Uint8Array | string;
+  /** Sniffed from the bytes (png, jpeg, gif, webp) or the `data:` URL when omitted. */
+  mimeType?: string;
+}
+
+export type MessagePart = TextPart | ImagePart;
+
+export type Message =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | MessagePart[] }
+  | { role: 'assistant'; content: string };
+
 // Base AI Request Interface
 export interface AIRequest {
-  prompt: string;
+  /** Shorthand for a final user message; appended after `messages`. One of `prompt` or `messages` is required. */
+  prompt?: string;
+  /** The conversation so far. A user message may carry image parts. */
+  messages?: Message[];
   modelId?: string;
   temperature?: number;
   maxTokens?: number;
@@ -63,6 +87,7 @@ export interface AIRequest {
   jsonMode?: boolean;
   /** Optional response schema, passed through when the provider supports one. */
   responseSchema?: unknown;
+  /** @deprecated Use `messages`; ignored when `messages` is given. Removed in 3.0. */
   history?: ConversationHistory[];
   metadata?: Record<string, any>;
   /** Aborts an in-flight request/stream. */

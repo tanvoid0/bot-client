@@ -6,6 +6,9 @@ import type {
   TokenUsage,
   FinishReason,
   BaseProviderConfig,
+  Message,
+  MessagePart,
+  ImagePart,
 } from '../types/index.js';
 import { AIError, toAIError, type AIErrorCode, type Refinement, type ClassifyContext } from '../core/errors.js';
 import {
@@ -22,23 +25,63 @@ import {
 export { HttpError, streamLines, parseSSE, parseNDJSON };
 export type { HttpOptions, HttpResult };
 
-export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+export type ChatMessage = Message;
 
-/** Build OpenAI-style messages array from request (systemPrompt + history + current prompt). */
-export function buildChatMessages(request: AIRequest): ChatMessage[] {
-  const messages: ChatMessage[] = [];
+/** The conversation as one list: systemPrompt, then `messages` (or the deprecated `history`), then `prompt` as a user turn. */
+export function buildChatMessages(request: AIRequest): Message[] {
+  const messages: Message[] = [];
   if (request.systemPrompt) {
     messages.push({ role: 'system', content: request.systemPrompt });
   }
-  if (request.history?.length) {
-    for (const h of request.history) {
-      if (h.role === 'system' || h.role === 'user' || h.role === 'assistant') {
-        messages.push({ role: h.role, content: h.content });
-      }
+  for (const m of request.messages ?? request.history ?? []) {
+    if (m.role === 'system' || m.role === 'user' || m.role === 'assistant') {
+      messages.push({ role: m.role, content: m.content } as Message);
     }
   }
-  messages.push({ role: 'user', content: request.prompt });
+  if (request.prompt !== undefined) messages.push({ role: 'user', content: request.prompt });
   return messages;
+}
+
+/** A message's content as parts, so providers handle one shape. */
+export function partsOf(content: string | MessagePart[]): MessagePart[] {
+  return typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+}
+
+/** The text of a message, image parts dropped; for hosts that take a plain string. */
+export function textOf(content: string | MessagePart[]): string {
+  return typeof content === 'string' ? content : content.filter((p): p is { type: 'text'; text: string } => p.type === 'text').map((p) => p.text).join('');
+}
+
+const MAGIC: Array<[string, string]> = [
+  ['iVBORw', 'image/png'],
+  ['/9j/', 'image/jpeg'],
+  ['R0lGOD', 'image/gif'],
+  ['UklGR', 'image/webp'],
+];
+
+function toBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/**
+ * The inline bytes of an image part as `{ mimeType, data }` (base64), or
+ * undefined when the part is a remote URL the provider must fetch itself.
+ */
+export function inlineImage(part: ImagePart): { mimeType: string; data: string } | undefined {
+  let data: string | undefined;
+  let mimeType = part.mimeType;
+  if (part.data instanceof Uint8Array) data = toBase64(part.data);
+  else if (typeof part.data === 'string') data = part.data;
+  else if (part.url?.startsWith('data:')) {
+    const m = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(part.url);
+    if (!m) throw new AIError('Malformed data: URL in image part', 'request', undefined, undefined, 'INVALID_REQUEST');
+    data = m[2];
+    mimeType ??= m[1];
+  }
+  if (data === undefined) return undefined;
+  return { mimeType: mimeType ?? MAGIC.find(([magic]) => data!.startsWith(magic))?.[1] ?? 'image/png', data };
 }
 
 /** First set environment variable among `names`, or undefined (also when there is no `process`). */

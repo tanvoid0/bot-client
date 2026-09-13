@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `AIRequest.messages`: the conversation as `Message[]` (`system` / `user` / `assistant`); a `user` message may carry parts, `{ type: 'text' }` and `{ type: 'image', url | data, mimeType? }`. Images go out as OpenAI `image_url` (remote URL or `data:` URL), Anthropic `source: base64 | url`, Gemini `inlineData` / `fileData`, Ollama `images[]`. Bytes and base64 are inlined with the mime type sniffed (png, jpeg, gif, webp) when not given; Ollama answers a remote URL with `UNSUPPORTED` and a hint. `prompt` is now optional and appended after `messages` as the final user turn. `Message`, `MessagePart`, `TextPart`, `ImagePart` exported; `partsOf`, `textOf`, `inlineImage` exported for custom providers.
+- The factory answers a request with neither `prompt` nor `messages` with `INVALID_REQUEST` before touching a provider.
+
+### Changed
+
+- `AIRequest.prompt` is optional (`string | undefined`); a custom provider reading it as a string needs a `?? ''`. `buildChatMessages` returns `Message[]`, whose `content` may be a parts array.
+
+### Deprecated
+
+- `AIRequest.history`: use `messages`; ignored when `messages` is given. Removed in 3.0.
+
 ### Fixed
 
 - A 200 reply whose only content is a refusal (`finish_reason: content_filter` on OpenAI-format hosts, `stop_reason: refusal` on Anthropic) is now a `CONTENT_FILTER` failure, as it already was for Gemini, instead of a success with empty `data`.

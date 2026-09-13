@@ -1,6 +1,6 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, firstEnv, mergeBody } from './base-provider.js';
+import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, textOf as messageText } from './base-provider.js';
 import { parseSSE } from '../core/http.js';
 
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com';
@@ -130,14 +130,19 @@ export class GeminiProvider extends BaseProvider {
   private buildBody(request: AIRequest): Record<string, unknown> {
     const messages = buildChatMessages(request);
     const systemParts: Array<{ text: string }> = [];
-    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<Record<string, unknown>> }> = [];
     for (const m of messages) {
       if (m.role === 'system') {
-        systemParts.push({ text: m.content });
+        systemParts.push({ text: messageText(m.content) });
       } else {
         contents.push({
           role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
+          parts: partsOf(m.content).map((p) => {
+            if (p.type === 'text') return { text: p.text };
+            const inline = inlineImage(p);
+            // A remote URL must be a Files API / GCS URI; Gemini does not fetch arbitrary http(s) URLs.
+            return inline ? { inlineData: inline } : { fileData: { mimeType: p.mimeType, fileUri: p.url } };
+          }),
         });
       }
     }

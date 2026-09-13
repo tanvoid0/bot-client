@@ -122,6 +122,9 @@ export class AIFactory {
    * catalog, `defaultProvider`, `providerOrder`, first registered.
    */
   private resolve(request: AIRequest): { provider: AIProvider; request: AIRequest } | AIError {
+    if (request.prompt === undefined && !request.messages?.length) {
+      return AIError.from({ message: 'Pass prompt or messages', provider: 'AIFactory', code: 'INVALID_REQUEST', hint: 'A request needs a prompt string or a non-empty messages array.' });
+    }
     const req: AIRequest = {
       ...request,
       timeout: request.timeout ?? this.config.timeout,

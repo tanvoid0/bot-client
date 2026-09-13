@@ -1,6 +1,6 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, firstEnv, mergeBody, totalTokens } from './base-provider.js';
+import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, textOf, totalTokens } from './base-provider.js';
 import { parseSSE } from '../core/http.js';
 
 const DEFAULT_BASE = 'https://api.anthropic.com';
@@ -125,7 +125,23 @@ export class AnthropicProvider extends BaseProvider {
     // The Messages API takes the system prompt as a top-level field and
     // rejects a system role inside `messages`.
     const all = buildChatMessages(request);
-    const systemParts = all.filter((m) => m.role === 'system').map((m) => m.content);
+    const systemParts = all.filter((m) => m.role === 'system').map((m) => textOf(m.content));
+    const messages = all
+      .filter((m) => m.role !== 'system')
+      .map((m) => ({
+        role: m.role,
+        content:
+          typeof m.content === 'string'
+            ? m.content
+            : partsOf(m.content).map((p) => {
+                if (p.type === 'text') return { type: 'text', text: p.text };
+                const inline = inlineImage(p);
+                return {
+                  type: 'image',
+                  source: inline ? { type: 'base64', media_type: inline.mimeType, data: inline.data } : { type: 'url', url: p.url },
+                };
+              }),
+      }));
     if (request.jsonMode) systemParts.push(JSON_NUDGE);
     const system = systemParts.join(SYSTEM_JOINER);
     const maxTokens = request.maxTokens ?? 4096;
@@ -137,7 +153,7 @@ export class AnthropicProvider extends BaseProvider {
     return mergeBody(
       {
         model,
-        messages: all.filter((m) => m.role !== 'system'),
+        messages,
         ...(system && { system }),
         max_tokens: request.reasoning ? Math.max(maxTokens, 2048) : maxTokens,
         ...thinking,

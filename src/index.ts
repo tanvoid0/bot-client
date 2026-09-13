@@ -14,7 +14,7 @@ export { LMStudioProvider } from './providers/lmstudio-provider.js';
 export type { LMStudioProviderConfig } from './providers/lmstudio-provider.js';
 export { OllamaProvider } from './providers/ollama-provider.js';
 export type { OllamaProviderConfig } from './providers/ollama-provider.js';
-export { BaseProvider, buildChatMessages, mergeBody } from './providers/base-provider.js';
+export { BaseProvider, buildChatMessages, inlineImage, mergeBody, partsOf, textOf } from './providers/base-provider.js';
 // `runOllamaCLI` / `isOllamaCLIAvailable` moved to '@tanvoid0/bot-client/ollama-cli' (1.8.0): they spawn a process, and this entry must run where `fetch` does.
 export type { OllamaCLIResult, OllamaCLIOptions } from './ollama-cli.js';
 
@@ -29,6 +29,10 @@ export type { RetryOptions } from './core/retry.js';
 export type {
   AIProvider,
   AIRequest,
+  Message,
+  MessagePart,
+  TextPart,
+  ImagePart,
   AIResponse,
   AIStreamChunk,
   AIFactoryConfig,

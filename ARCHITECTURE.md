@@ -621,7 +621,7 @@ if a 2.0 is not ready.
 
 ### Phase 3 — capability parity (2.0.0, breaking)
 
-- [ ] `messages[]` with image parts; `history` deprecated
+- [x] `messages[]` with image parts; `history` deprecated (2026-09-13: `prompt` optional, `Message` union without tool roles yet — those land with tool calling; `.` is 14.9 kB gz after this)
 - [ ] Tool calling on OpenAI-compatible, Anthropic, Gemini, Ollama; `maxSteps` loop in `core/tools.ts`
 - [ ] `schema` via Standard Schema / JSON Schema; `object` on response; `SCHEMA_MISMATCH` / `INVALID_JSON`
 - [ ] Typed stream chunks; `legacyChunks` flag

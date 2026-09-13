@@ -1,6 +1,6 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
-import { BaseProvider, buildChatMessages, firstEnv, mergeBody, totalTokens } from './base-provider.js';
+import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, totalTokens } from './base-provider.js';
 import { parseSSE } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
 
@@ -142,10 +142,22 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   protected body(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
     const maxTokens = request.maxTokens ?? this.cfg.defaultMaxTokens;
+    const messages = buildChatMessages(request).map((m) =>
+      typeof m.content === 'string'
+        ? m
+        : {
+            role: m.role,
+            content: partsOf(m.content).map((p) => {
+              if (p.type === 'text') return { type: 'text', text: p.text };
+              const inline = inlineImage(p);
+              return { type: 'image_url', image_url: { url: inline ? `data:${inline.mimeType};base64,${inline.data}` : p.url } };
+            }),
+          }
+    );
     return mergeBody(
       {
         model,
-        messages: buildChatMessages(request),
+        messages,
         ...(maxTokens !== undefined && { max_tokens: maxTokens }),
         temperature: request.temperature ?? 0.7,
         ...(request.jsonMode && { response_format: { type: 'json_object' } }),
