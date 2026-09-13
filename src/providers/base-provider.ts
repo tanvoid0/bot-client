@@ -9,6 +9,7 @@ import type {
   Message,
   MessagePart,
   ImagePart,
+  ToolCall,
 } from '../types/index.js';
 import { AIError, toAIError, type AIErrorCode, type Refinement, type ClassifyContext } from '../core/errors.js';
 import {
@@ -34,9 +35,7 @@ export function buildChatMessages(request: AIRequest): Message[] {
     messages.push({ role: 'system', content: request.systemPrompt });
   }
   for (const m of request.messages ?? request.history ?? []) {
-    if (m.role === 'system' || m.role === 'user' || m.role === 'assistant') {
-      messages.push({ role: m.role, content: m.content } as Message);
-    }
+    if (m.role === 'system' || m.role === 'user' || m.role === 'assistant' || m.role === 'tool') messages.push(m as Message);
   }
   if (request.prompt !== undefined) messages.push({ role: 'user', content: request.prompt });
   return messages;
@@ -119,6 +118,7 @@ export interface OkExtra {
   usage?: TokenUsage;
   finishReason?: FinishReason;
   requestId?: string;
+  toolCalls?: ToolCall[];
 }
 
 export abstract class BaseProvider implements AIProvider {
@@ -277,13 +277,15 @@ export abstract class BaseProvider implements AIProvider {
       );
     }
     const usage = extra.usage;
+    const toolCalls = extra.toolCalls?.length ? extra.toolCalls : undefined;
     return {
       success: true,
       data,
       ...(extra.reasoning && { reasoning: extra.reasoning }),
       modelUsed: extra.modelUsed || this.supportedModels[0] || 'unknown',
       providerId: this.providerId,
-      finishReason: extra.finishReason ?? 'unknown',
+      finishReason: toolCalls ? 'tool_calls' : (extra.finishReason ?? 'unknown'),
+      ...(toolCalls && { toolCalls }),
       ...(extra.requestId && { requestId: extra.requestId }),
       ...(usage && { usage }),
       ...(usage?.promptTokens !== undefined && { promptTokens: usage.promptTokens }),

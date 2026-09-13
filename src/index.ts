@@ -23,6 +23,7 @@ export { HttpError, streamLines, parseSSE, parseNDJSON } from './core/http.js';
 export type { HttpOptions, SseEvent, FetchLike } from './core/http.js';
 export { guessProvider } from './core/catalog.js';
 export { splitThinkTags, ThinkFilter } from './core/reasoning.js';
+export { openaiTools, parseArgs, recoverLeakedToolCalls, runTools, nextStepRequest } from './core/tools.js';
 export type { RetryOptions } from './core/retry.js';
 
 // Types for requests, responses, and configuration
@@ -33,6 +34,10 @@ export type {
   MessagePart,
   TextPart,
   ImagePart,
+  Tool,
+  ToolCall,
+  ToolResult,
+  Step,
   AIResponse,
   AIStreamChunk,
   AIFactoryConfig,

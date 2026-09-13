@@ -44,6 +44,8 @@ export interface AIStreamChunk {
   modelUsed?: string;
   /** On the `done` chunk. */
   finishReason?: FinishReason;
+  /** On the `done` chunk, or on an intermediate chunk when the factory ran the calls and continued. */
+  toolCalls?: ToolCall[];
   /** On the `done` chunk, when the provider sends one. */
   requestId?: string;
   /** On the `done` chunk: wall time for the whole stream (set by the factory). */
@@ -71,7 +73,40 @@ export type MessagePart = TextPart | ImagePart;
 export type Message =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string | MessagePart[] }
-  | { role: 'assistant'; content: string };
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'tool'; toolCallId: string; name: string; content: string };
+
+/** A function the model may call. With `execute`, the factory runs it when `maxSteps > 1`. */
+export interface Tool {
+  name: string;
+  description?: string;
+  /** JSON Schema for the arguments. */
+  parameters: Record<string, unknown>;
+  execute?: (args: any, ctx: { signal?: AbortSignal }) => unknown | Promise<unknown>;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  /** Parsed JSON; the raw string when the model sent arguments that are not JSON. */
+  arguments: any;
+}
+
+export interface ToolResult {
+  toolCallId: string;
+  name: string;
+  result?: unknown;
+  /** The tool threw; the message is sent back to the model as `{ error }`. */
+  error?: string;
+}
+
+/** One round of the tool loop: what the model said, what it called, what came back. */
+export interface Step {
+  text: string;
+  toolCalls: ToolCall[];
+  toolResults: ToolResult[];
+  usage?: TokenUsage;
+}
 
 // Base AI Request Interface
 export interface AIRequest {
@@ -92,6 +127,11 @@ export interface AIRequest {
   metadata?: Record<string, any>;
   /** Aborts an in-flight request/stream. */
   signal?: AbortSignal;
+  /** Functions the model may call. Calls come back on `toolCalls`; with `maxSteps > 1` and `execute` set, the factory runs them and continues. */
+  tools?: Tool[];
+  toolChoice?: 'auto' | 'none' | 'required' | { name: string };
+  /** Rounds of model call + tool execution the factory runs before returning (default 1: calls are returned, not executed). */
+  maxSteps?: number;
   /** Whole-request timeout in ms for non-streaming calls (default 30000; 0 disables). */
   timeout?: number;
   /** Streaming: ms of upstream silence before the stream fails with `STREAM_IDLE` (default 60000; 0 disables). */
@@ -134,6 +174,10 @@ export interface AIResponse {
   modelUsed?: string;
   providerId?: string;
   finishReason?: FinishReason;
+  /** Calls the model wants made; `finishReason` is `'tool_calls'`. Absent when there are none. */
+  toolCalls?: ToolCall[];
+  /** The rounds the factory ran before this answer, when `maxSteps > 1` and at least one tool ran. */
+  steps?: Step[];
   usage?: TokenUsage;
   /** Total tokens billed, when the provider reports them. Same as `usage.totalTokens`. */
   tokensUsed?: number;

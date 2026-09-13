@@ -1,6 +1,8 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, inlineImage, mergeBody, textOf, totalTokens } from './base-provider.js';
+import { openaiTools, parseArgs, recoverLeakedToolCalls } from '../core/tools.js';
+import type { ToolCall } from '../types/index.js';
 import { parseNDJSON } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
 import type { runOllamaCLI, OllamaCLIResult, OllamaCLIOptions } from '../ollama-cli.js';
@@ -222,6 +224,7 @@ export class OllamaProvider extends BaseProvider {
       return { code: 'MODEL_NOT_FOUND', hint: `Run \`ollama pull ${m ?? '<model>'}\` and try again.` };
     }
     if (/context length|too many tokens|exceeds/i.test(message)) return { code: 'CONTEXT_LENGTH' };
+    if (/does not support tools/i.test(message)) return { code: 'UNSUPPORTED', hint: 'Pick a model that lists "tools" in `ollama show`, or drop `tools` from the request.' };
     if (/out of memory|cuda|runner process/i.test(message)) return { code: 'SERVER' };
     return {};
   }
@@ -240,6 +243,10 @@ export class OllamaProvider extends BaseProvider {
 
   private chatBody(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
     const messages = buildChatMessages(request).map((m) => {
+      if (m.role === 'tool') return { role: 'tool', content: m.content, tool_name: m.name };
+      if (m.role === 'assistant' && m.toolCalls?.length) {
+        return { role: 'assistant', content: m.content, tool_calls: m.toolCalls.map((c) => ({ function: { name: c.name, arguments: parseArgs(c.arguments) } })) };
+      }
       if (typeof m.content === 'string') return m;
       const images = m.content
         .filter((p): p is Extract<typeof p, { type: 'image' }> => p.type === 'image')
@@ -260,6 +267,7 @@ export class OllamaProvider extends BaseProvider {
         model,
         messages,
         stream,
+        ...(request.tools?.length && { tools: openaiTools(request.tools) }),
         think: request.reasoning ?? false,
         ...(request.jsonMode && { format: 'json' }),
         options: {
@@ -296,9 +304,11 @@ export class OllamaProvider extends BaseProvider {
 
     // Models that inline <think> tags instead of using the `thinking` field.
     const think = new ThinkFilter();
+    const toolCalls: ToolCall[] = [];
     try {
       for await (const parsed of parseNDJSON(stream)) {
         if (typeof parsed?.error === 'string') throw this.lineError(parsed.error, model);
+        toolCalls.push(...toolCallsOf(parsed?.message?.tool_calls, toolCalls.length));
         const thinking = parsed?.message?.thinking;
         if (typeof thinking === 'string' && thinking.length > 0) {
           yield { text: '', reasoning: thinking, modelUsed: model };
@@ -319,7 +329,8 @@ export class OllamaProvider extends BaseProvider {
             text: '',
             done: true,
             modelUsed: model,
-            finishReason: doneReason(parsed.done_reason),
+            finishReason: toolCalls.length ? 'tool_calls' : doneReason(parsed.done_reason),
+            ...(toolCalls.length && { toolCalls }),
             usage: { promptTokens, completionTokens, totalTokens: totalTokens(promptTokens, completionTokens) },
           };
         }
@@ -342,16 +353,26 @@ export class OllamaProvider extends BaseProvider {
       const completionTokens = response?.eval_count;
       const split = splitThinkTags(response?.message?.content ?? '');
       const thinking = typeof response?.message?.thinking === 'string' ? response.message.thinking : '';
-      return this.ok(split.text, {
+      let toolCalls = toolCallsOf(response?.message?.tool_calls);
+      let text = split.text;
+      if (!toolCalls.length) ({ text, toolCalls } = recoverLeakedToolCalls(text, request.tools));
+      return this.ok(text, {
         reasoning: [thinking, split.reasoning].filter(Boolean).join('\n') || undefined,
         modelUsed: response?.model ?? model,
         finishReason: doneReason(response?.done_reason),
+        toolCalls,
         usage: { promptTokens, completionTokens, totalTokens: totalTokens(promptTokens, completionTokens) },
       });
     } catch (error) {
       return this.fail(this.toError(error, model), model);
     }
   }
+}
+
+/** Ollama sends `{ function: { name, arguments } }` with the arguments already an object and no id. */
+function toolCallsOf(raw: unknown, offset = 0): ToolCall[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((t, i) => ({ id: `call_${offset + i}`, name: t?.function?.name ?? '', arguments: parseArgs(t?.function?.arguments) }));
 }
 
 function doneReason(raw: unknown): FinishReason {

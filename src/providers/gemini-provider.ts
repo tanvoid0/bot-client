@@ -1,6 +1,8 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, textOf as messageText } from './base-provider.js';
+import { parseArgs } from '../core/tools.js';
+import type { ToolCall } from '../types/index.js';
 import { parseSSE } from '../core/http.js';
 
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com';
@@ -39,6 +41,29 @@ function usageOf(meta: any): TokenUsage | undefined {
 }
 
 /** Answer text and, when `includeThoughts` was on, the thought parts (`thought: true`) separately. */
+/** `functionCall` parts of a candidate. Gemini sends no call ids; positional ones are made up. */
+function toolCallsOf(candidate: any, offset = 0): ToolCall[] {
+  const parts: any[] = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  return parts
+    .filter((p) => p?.functionCall)
+    .map((p, i) => ({ id: p.functionCall.id ?? `call_${offset + i}`, name: p.functionCall.name ?? '', arguments: p.functionCall.args ?? {} }));
+}
+
+/** `functionResponse.response` must be an object: a JSON object result as is, anything else wrapped. */
+function responseOf(content: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(content);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : { result: v };
+  } catch {
+    return { result: content };
+  }
+}
+
+function toolConfigOf(choice: NonNullable<AIRequest['toolChoice']>): Record<string, unknown> {
+  if (typeof choice === 'object') return { mode: 'ANY', allowedFunctionNames: [choice.name] };
+  return { mode: choice === 'required' ? 'ANY' : choice.toUpperCase() };
+}
+
 function textOf(candidate: any): { text: string; reasoning: string } {
   const parts = candidate?.content?.parts;
   if (!Array.isArray(parts)) return { text: '', reasoning: '' };
@@ -134,6 +159,20 @@ export class GeminiProvider extends BaseProvider {
     for (const m of messages) {
       if (m.role === 'system') {
         systemParts.push({ text: messageText(m.content) });
+      } else if (m.role === 'tool') {
+        // Every result for one model turn goes in the same user turn.
+        const part = { functionResponse: { name: m.name, response: responseOf(m.content) } };
+        const prev = contents[contents.length - 1];
+        if (prev?.role === 'user' && prev.parts[0]?.functionResponse) prev.parts.push(part);
+        else contents.push({ role: 'user', parts: [part] });
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
+        contents.push({
+          role: 'model',
+          parts: [
+            ...(m.content ? [{ text: m.content }] : []),
+            ...m.toolCalls.map((c) => ({ functionCall: { name: c.name, args: parseArgs(c.arguments) } })),
+          ],
+        });
       } else {
         contents.push({
           role: m.role === 'assistant' ? 'model' : 'user',
@@ -148,6 +187,10 @@ export class GeminiProvider extends BaseProvider {
     }
     const body: Record<string, unknown> = {
       contents,
+      ...(request.tools?.length && {
+        tools: [{ functionDeclarations: request.tools.map((t) => ({ name: t.name, ...(t.description && { description: t.description }), parameters: t.parameters })) }],
+        ...(request.toolChoice && { toolConfig: { functionCallingConfig: toolConfigOf(request.toolChoice) } }),
+      }),
       generationConfig: {
         maxOutputTokens: request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: request.temperature ?? 0.7,
@@ -186,6 +229,7 @@ export class GeminiProvider extends BaseProvider {
       if (blocked) return this.fail(blocked, model);
       const candidate = data?.candidates?.[0];
       const { text, reasoning } = textOf(candidate);
+      const toolCalls = toolCallsOf(candidate);
       const finish = finishReason(candidate?.finishReason);
       if (finish === 'content_filter' && !text) {
         return this.fail(
@@ -200,6 +244,7 @@ export class GeminiProvider extends BaseProvider {
         reasoning: reasoning || undefined,
         modelUsed: data?.modelVersion ?? model,
         finishReason: finish,
+        toolCalls,
         usage: usageOf(data?.usageMetadata),
       });
     } catch (error) {
@@ -232,6 +277,7 @@ export class GeminiProvider extends BaseProvider {
     let finish: FinishReason | undefined;
     let wrote = false;
     let modelUsed = model;
+    const toolCalls: ToolCall[] = [];
     try {
       for await (const { data } of parseSSE(stream)) {
         if (!data || data === '[DONE]') continue;
@@ -255,6 +301,7 @@ export class GeminiProvider extends BaseProvider {
           wrote = true;
           yield { text, modelUsed };
         }
+        toolCalls.push(...toolCallsOf(candidate, toolCalls.length));
         if (candidate?.finishReason) finish = finishReason(candidate.finishReason);
         if (parsed?.usageMetadata) usage = usageOf(parsed.usageMetadata);
       }
@@ -264,6 +311,13 @@ export class GeminiProvider extends BaseProvider {
     if (finish === 'content_filter' && !wrote) {
       throw this.error('CONTENT_FILTER', 'Answer blocked by Gemini', { model });
     }
-    yield { text: '', done: true, modelUsed, usage, finishReason: finish ?? 'unknown' };
+    yield {
+      text: '',
+      done: true,
+      modelUsed,
+      usage,
+      finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),
+      ...(toolCalls.length && { toolCalls }),
+    };
   }
 }

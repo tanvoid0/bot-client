@@ -1,6 +1,8 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, textOf, totalTokens } from './base-provider.js';
+import { parseArgs } from '../core/tools.js';
+import type { ToolCall } from '../types/index.js';
 import { parseSSE } from '../core/http.js';
 
 const DEFAULT_BASE = 'https://api.anthropic.com';
@@ -14,6 +16,11 @@ export interface AnthropicProviderConfig extends BaseProviderConfig {
   apiKey?: string;
   /** Origin; defaults to api.anthropic.com. Point at a gateway that speaks the Messages API. */
   baseURL?: string;
+}
+
+function toolChoiceOf(choice: NonNullable<AIRequest['toolChoice']>): unknown {
+  if (typeof choice === 'object') return { type: 'tool', name: choice.name };
+  return { type: choice === 'required' ? 'any' : choice };
 }
 
 function finishReason(raw: unknown): FinishReason {
@@ -126,9 +133,28 @@ export class AnthropicProvider extends BaseProvider {
     // rejects a system role inside `messages`.
     const all = buildChatMessages(request);
     const systemParts = all.filter((m) => m.role === 'system').map((m) => textOf(m.content));
-    const messages = all
-      .filter((m) => m.role !== 'system')
-      .map((m) => ({
+    const messages: Array<{ role: string; content: unknown }> = [];
+    for (const m of all) {
+      if (m.role === 'system') continue;
+      if (m.role === 'tool') {
+        // Results go back as a user turn; every result for one assistant turn shares that turn.
+        const block = { type: 'tool_result', tool_use_id: m.toolCallId, content: m.content };
+        const prev = messages[messages.length - 1];
+        if (prev?.role === 'user' && Array.isArray(prev.content) && prev.content[0]?.type === 'tool_result') prev.content.push(block);
+        else messages.push({ role: 'user', content: [block] });
+        continue;
+      }
+      if (m.role === 'assistant' && m.toolCalls?.length) {
+        messages.push({
+          role: 'assistant',
+          content: [
+            ...(m.content ? [{ type: 'text', text: m.content }] : []),
+            ...m.toolCalls.map((c) => ({ type: 'tool_use', id: c.id, name: c.name, input: parseArgs(c.arguments) })),
+          ],
+        });
+        continue;
+      }
+      messages.push({
         role: m.role,
         content:
           typeof m.content === 'string'
@@ -141,7 +167,12 @@ export class AnthropicProvider extends BaseProvider {
                   source: inline ? { type: 'base64', media_type: inline.mimeType, data: inline.data } : { type: 'url', url: p.url },
                 };
               }),
-      }));
+      });
+    }
+    const tools = request.tools?.length && {
+      tools: request.tools.map((t) => ({ name: t.name, ...(t.description && { description: t.description }), input_schema: t.parameters })),
+      ...(request.toolChoice && { tool_choice: toolChoiceOf(request.toolChoice) }),
+    };
     if (request.jsonMode) systemParts.push(JSON_NUDGE);
     const system = systemParts.join(SYSTEM_JOINER);
     const maxTokens = request.maxTokens ?? 4096;
@@ -154,6 +185,7 @@ export class AnthropicProvider extends BaseProvider {
       {
         model,
         messages,
+        ...tools,
         ...(system && { system }),
         max_tokens: request.reasoning ? Math.max(maxTokens, 2048) : maxTokens,
         ...thinking,
@@ -176,14 +208,18 @@ export class AnthropicProvider extends BaseProvider {
         body: this.body(request, model, false),
         ...this.requestOptions(request),
       });
-      const blocks: Array<{ type?: string; text?: string; thinking?: string }> = data?.content ?? [];
+      const blocks: Array<{ type?: string; text?: string; thinking?: string; id?: string; name?: string; input?: unknown }> = data?.content ?? [];
       const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
       const reasoning = blocks.filter((b) => b.type === 'thinking').map((b) => b.thinking ?? '').join('\n');
+      const toolCalls: ToolCall[] = blocks
+        .filter((b) => b.type === 'tool_use')
+        .map((b, i) => ({ id: b.id ?? `call_${i}`, name: b.name ?? '', arguments: b.input ?? {} }));
       const u = data?.usage;
       return this.ok(text, {
         reasoning: reasoning || undefined,
         modelUsed: data?.model ?? model,
         finishReason: finishReason(data?.stop_reason),
+        toolCalls,
         requestId: headers.get('request-id') ?? undefined,
         usage: u && {
           promptTokens: u.input_tokens,
@@ -219,6 +255,9 @@ export class AnthropicProvider extends BaseProvider {
     let modelUsed = model;
     let finish: FinishReason | undefined;
     const usage: TokenUsage = {};
+    // A tool_use block opens with its id and name; the input arrives as JSON text deltas.
+    const calls: Array<{ id: string; name: string; json: string }> = [];
+    let open: (typeof calls)[number] | undefined;
     try {
       for await (const { event, data } of parseSSE(stream)) {
         let frame: any;
@@ -236,7 +275,13 @@ export class AnthropicProvider extends BaseProvider {
           usage.promptTokens = frame.message?.usage?.input_tokens;
           if (frame.message?.usage?.cache_read_input_tokens !== undefined)
             usage.cachedTokens = frame.message.usage.cache_read_input_tokens;
+        } else if (type === 'content_block_start' && frame.content_block?.type === 'tool_use') {
+          open = { id: frame.content_block.id ?? `call_${calls.length}`, name: frame.content_block.name ?? '', json: '' };
+          calls.push(open);
+        } else if (type === 'content_block_stop') {
+          open = undefined;
         } else if (type === 'content_block_delta') {
+          if (frame.delta?.type === 'input_json_delta' && open && typeof frame.delta.partial_json === 'string') open.json += frame.delta.partial_json;
           const text = frame.delta?.text;
           if (frame.delta?.type === 'text_delta' && typeof text === 'string' && text.length > 0) yield { text, modelUsed };
           const thinking = frame.delta?.thinking;
@@ -251,7 +296,15 @@ export class AnthropicProvider extends BaseProvider {
       throw this.toError(error, model);
     }
     usage.totalTokens = totalTokens(usage.promptTokens, usage.completionTokens);
-    yield { text: '', done: true, modelUsed, usage, finishReason: finish ?? 'unknown' };
+    const toolCalls: ToolCall[] = calls.map((c) => ({ id: c.id, name: c.name, arguments: c.json ? parseArgs(c.json) : {} }));
+    yield {
+      text: '',
+      done: true,
+      modelUsed,
+      usage,
+      finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),
+      ...(toolCalls.length && { toolCalls }),
+    };
   }
 
   /** An `error` event mid-stream, classified the same way as an HTTP error body. */

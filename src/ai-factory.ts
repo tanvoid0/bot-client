@@ -1,4 +1,5 @@
-import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, Hooks } from './types/index.js';
+import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, Hooks, Step, ToolCall } from './types/index.js';
+import { canRun, nextStepRequest, runTools } from './core/tools.js';
 import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
 import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
 import { guessProvider, splitExplicit } from './core/catalog.js';
@@ -209,6 +210,21 @@ export class AIFactory {
    * carries `success: false` and a classified `errorInfo`.
    */
   async process(request: AIRequest): Promise<AIResponse> {
+    const maxSteps = request.maxSteps ?? 1;
+    if (maxSteps <= 1 || !request.tools?.length) return this.processOnce(request);
+    const steps: Step[] = [];
+    let req = request;
+    for (let step = 1; ; step++) {
+      const res = await this.processOnce(req);
+      const calls = res.success ? (res.toolCalls ?? []) : [];
+      if (step >= maxSteps || !canRun(req.tools, calls)) return steps.length ? { ...res, steps } : res;
+      const results = await runTools(req.tools!, calls, req.signal);
+      steps.push({ text: res.data ?? '', toolCalls: calls, toolResults: results, usage: res.usage });
+      req = nextStepRequest(req, res.data ?? '', calls, results);
+    }
+  }
+
+  private async processOnce(request: AIRequest): Promise<AIResponse> {
     await this.ensureInitialized();
     const started = now();
     const resolved = this.resolve(request);
@@ -316,6 +332,34 @@ export class AIFactory {
    * that is thrown from the iterator as an `AIError`.
    */
   async *processStream(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
+    const maxSteps = request.maxSteps ?? 1;
+    if (maxSteps <= 1 || !request.tools?.length) return yield* this.streamOnce(request);
+    let req = request;
+    for (let step = 1; ; step++) {
+      let text = '';
+      let calls: ToolCall[] = [];
+      let done: AIStreamChunk | undefined;
+      for await (const chunk of this.streamOnce(req)) {
+        text += chunk.text;
+        if (!chunk.done) {
+          yield chunk;
+          continue;
+        }
+        done = chunk;
+        calls = chunk.toolCalls ?? [];
+      }
+      if (step >= maxSteps || !canRun(req.tools, calls)) {
+        if (done) yield done;
+        return;
+      }
+      // Not the end: the calls go out on a plain chunk and the next step's answer follows.
+      yield { text: '', toolCalls: calls, modelUsed: done?.modelUsed };
+      const results = await runTools(req.tools!, calls, req.signal);
+      req = nextStepRequest(req, text, calls, results);
+    }
+  }
+
+  private async *streamOnce(request: AIRequest): AsyncGenerator<AIStreamChunk, void, void> {
     await this.ensureInitialized();
     const started = now();
     const resolved = this.resolve(request);

@@ -1,6 +1,8 @@
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, totalTokens } from './base-provider.js';
+import { openaiToolChoice, openaiTools, parseArgs, recoverLeakedToolCalls, stringifyArgs } from '../core/tools.js';
+import type { ToolCall } from '../types/index.js';
 import { parseSSE } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
 
@@ -142,22 +144,33 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   protected body(request: AIRequest, model: string, stream: boolean): Record<string, unknown> {
     const maxTokens = request.maxTokens ?? this.cfg.defaultMaxTokens;
-    const messages = buildChatMessages(request).map((m) =>
-      typeof m.content === 'string'
-        ? m
-        : {
-            role: m.role,
-            content: partsOf(m.content).map((p) => {
-              if (p.type === 'text') return { type: 'text', text: p.text };
-              const inline = inlineImage(p);
-              return { type: 'image_url', image_url: { url: inline ? `data:${inline.mimeType};base64,${inline.data}` : p.url } };
-            }),
-          }
-    );
+    const messages = buildChatMessages(request).map((m) => {
+      if (m.role === 'tool') return { role: 'tool', tool_call_id: m.toolCallId, content: m.content };
+      if (m.role === 'assistant' && m.toolCalls?.length) {
+        return {
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: stringifyArgs(c.arguments) } })),
+        };
+      }
+      if (typeof m.content === 'string') return m;
+      return {
+        role: m.role,
+        content: partsOf(m.content).map((p) => {
+          if (p.type === 'text') return { type: 'text', text: p.text };
+          const inline = inlineImage(p);
+          return { type: 'image_url', image_url: { url: inline ? `data:${inline.mimeType};base64,${inline.data}` : p.url } };
+        }),
+      };
+    });
     return mergeBody(
       {
         model,
         messages,
+        ...(request.tools?.length && {
+          tools: openaiTools(request.tools),
+          ...(request.toolChoice && { tool_choice: openaiToolChoice(request.toolChoice) }),
+        }),
         ...(maxTokens !== undefined && { max_tokens: maxTokens }),
         temperature: request.temperature ?? 0.7,
         ...(request.jsonMode && { response_format: { type: 'json_object' } }),
@@ -192,10 +205,14 @@ export class OpenAICompatibleProvider extends BaseProvider {
       const usage = data?.usage;
       const split = splitThinkTags(choice?.message?.content ?? '');
       const field = reasoningField(choice?.message);
-      return this.ok(split.text, {
+      let toolCalls = toolCallsOf(choice?.message?.tool_calls);
+      let text = split.text;
+      if (!toolCalls.length) ({ text, toolCalls } = recoverLeakedToolCalls(text, request.tools));
+      return this.ok(text, {
         reasoning: [field, split.reasoning].filter(Boolean).join('\n') || undefined,
         modelUsed: data?.model ?? model,
         finishReason: finishReason(choice?.finish_reason),
+        toolCalls,
         requestId: headers.get('x-request-id') ?? undefined,
         usage: usage && {
           promptTokens: usage.prompt_tokens,
@@ -230,6 +247,8 @@ export class OpenAICompatibleProvider extends BaseProvider {
     let usage: AIStreamChunk['usage'];
     let modelUsed = model;
     const think = new ThinkFilter();
+    // Tool call deltas arrive by index: the id and name first, then argument text in pieces.
+    const calls: Array<{ id?: string; name?: string; args: string }> = [];
     try {
       for await (const { data } of parseSSE(stream)) {
         if (data === '[DONE]') break;
@@ -250,6 +269,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
           if (part.reasoning) yield { text: '', reasoning: part.reasoning, modelUsed };
           if (part.text) yield { text: part.text, modelUsed };
         }
+        for (const tc of choice?.delta?.tool_calls ?? []) {
+          const slot = (calls[tc.index ?? calls.length] ??= { args: '' });
+          if (tc.id) slot.id = tc.id;
+          if (tc.function?.name) slot.name = tc.function.name;
+          if (typeof tc.function?.arguments === 'string') slot.args += tc.function.arguments;
+        }
         if (choice?.finish_reason) finish = finishReason(choice.finish_reason);
         if (frame?.usage) {
           usage = {
@@ -265,8 +290,22 @@ export class OpenAICompatibleProvider extends BaseProvider {
     const tail = think.flush();
     if (tail.reasoning) yield { text: '', reasoning: tail.reasoning, modelUsed };
     if (tail.text) yield { text: tail.text, modelUsed };
-    yield { text: '', done: true, modelUsed, usage, finishReason: finish ?? 'unknown' };
+    const toolCalls = calls.filter(Boolean).map((c, i) => ({ id: c.id ?? `call_${i}`, name: c.name ?? '', arguments: parseArgs(c.args) }));
+    yield {
+      text: '',
+      done: true,
+      modelUsed,
+      usage,
+      finishReason: toolCalls.length ? 'tool_calls' : (finish ?? 'unknown'),
+      ...(toolCalls.length && { toolCalls }),
+    };
   }
+}
+
+/** `message.tool_calls` from a one-shot reply. Ollama-style entries carry the arguments as an object and no id. */
+function toolCallsOf(raw: unknown): ToolCall[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((t, i) => ({ id: t?.id ?? `call_${i}`, name: t?.function?.name ?? '', arguments: parseArgs(t?.function?.arguments) }));
 }
 
 /** DeepSeek, vLLM and llama.cpp use `reasoning_content`; OpenRouter and LM Studio use `reasoning`. */
