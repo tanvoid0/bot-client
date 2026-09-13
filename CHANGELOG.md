@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Leaked tool calls: text of the form `<function=name>{json}</function>` from a weak local model is recovered as a real call (first occurrence per tool) and stripped from `data`, on OpenAI-format hosts and Ollama, whenever `tools` were offered. `recoverLeakedToolCalls` exported.
 - Ollama's "model does not support tools" 400 classifies as `UNSUPPORTED` with a hint.
 - `core/tools.ts` helpers exported for custom providers: `openaiTools`, `parseArgs`, `runTools`, `nextStepRequest`.
+- **Structured output**: `AIRequest.schema` takes a JSON Schema object or any Standard Schema (Zod, Valibot, ArkType, ...). It implies JSON mode; a JSON form of the schema (a plain object, or a library's `~standard.jsonSchema`) goes out as OpenAI `response_format: json_schema`, Gemini `responseSchema`, Ollama `format`, and into Anthropic's system nudge. The factory parses the answer (a stray ```json fence is tolerated) and validates it through the Standard Schema; the result is `AIResponse.object`, the raw text stays on `data`. Failures: `INVALID_JSON` (text in `errorInfo.details`), `SCHEMA_MISMATCH` (issues with paths in `details`, first one in the message), and `TRUNCATED` on `finishReason: 'length'`, which now covers `schema` as well as `jsonMode`. Streams ignore `schema`. A plain JSON Schema is not validated locally (no validator ships); `object` is the parsed value. `StandardSchemaV1` type and `jsonSchemaOf` / `parseJson` / `isStandardSchema` exported.
 - `@tanvoid0/bot-client/core`: the factory, errors, types and helpers without the built-in providers. `AIFactory` from `./core` has no default providers (pass `providers`); `./core` plus one provider subpath bundles to 11.5 kB gz, against 17 kB for `.`. The `.` entry is unchanged: its `AIFactory` still defaults to all five providers, and `aiFactory` still works with no config.
 
 ### Changed
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 - `AIRequest.history`: use `messages`; ignored when `messages` is given. Removed in 3.0.
+- `AIRequest.responseSchema` (Gemini-only passthrough): use `schema`. Removed in 3.0.
 
 ### Fixed
 

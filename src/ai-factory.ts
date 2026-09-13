@@ -1,5 +1,6 @@
 import type { AIProvider, AIRequest, AIResponse, AIFactoryConfig, AIStreamChunk, DiscoveryMode, Hooks, Step, ToolCall } from './types/index.js';
 import { canRun, nextStepRequest, runTools } from './core/tools.js';
+import { parseJson, validate, wantsJson } from './core/schema.js';
 import { AIError, toAIError, SINGLE_RETRY } from './core/errors.js';
 import { DEFAULT_RETRY, retryDelay, sleep, type RetryOptions } from './core/retry.js';
 import { guessProvider, splitExplicit } from './core/catalog.js';
@@ -297,18 +298,28 @@ export class AIFactory {
       result.errorInfo = AIError.from({ message: result.error ?? 'Request failed', provider: provider.providerId, model: request.modelId, retryable: true });
     }
     // A JSON answer cut off by maxTokens is unusable; say so instead of handing back half a document.
-    if (result.success && request.jsonMode && result.finishReason === 'length') {
-      const err = AIError.from({
-        message: 'JSON answer truncated by maxTokens',
-        provider: provider.providerId,
-        code: 'TRUNCATED',
-        model: result.modelUsed,
-        hint: 'Raise maxTokens; the answer was cut off before the JSON was complete.',
-        details: result.data,
-      });
-      return { ...result, success: false, error: err.message, errorInfo: err };
+    if (result.success && wantsJson(request) && result.finishReason === 'length') {
+      return this.reject(result, provider, 'TRUNCATED', 'JSON answer truncated by maxTokens', 'Raise maxTokens; the answer was cut off before the JSON was complete.', result.data);
+    }
+    if (result.success && request.schema !== undefined && !result.toolCalls) {
+      const parsed = parseJson(result.data ?? '');
+      if ('error' in parsed) {
+        return this.reject(result, provider, 'INVALID_JSON', `Answer is not valid JSON: ${parsed.error}`, 'Ask for JSON in the prompt as well, or lower the temperature; the raw text is in errorInfo.details.', result.data);
+      }
+      const checked = await validate(request.schema, parsed.value);
+      if ('issues' in checked) {
+        const first = checked.issues[0];
+        return this.reject(result, provider, 'SCHEMA_MISMATCH', `Answer does not match the schema: ${first?.path ? `${first.path}: ` : ''}${first?.message ?? 'validation failed'}`, 'Describe the fields in the prompt, or loosen the schema; every issue is in errorInfo.details.', checked.issues);
+      }
+      return { ...result, object: checked.value };
     }
     return result;
+  }
+
+  /** A successful reply the factory refuses after the fact, keeping the provider's text on `data`. */
+  private reject(result: AIResponse, provider: AIProvider, code: AIError['code'], message: string, hint: string, details: unknown): AIResponse {
+    const err = AIError.from({ message, provider: provider.providerId, code, model: result.modelUsed, hint, details });
+    return { ...result, success: false, error: err.message, errorInfo: err };
   }
 
   private failure(provider: AIProvider, error: unknown, model?: string): AIResponse {

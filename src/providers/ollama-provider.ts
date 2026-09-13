@@ -2,6 +2,7 @@ import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishRe
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, inlineImage, mergeBody, textOf, totalTokens } from './base-provider.js';
 import { openaiTools, parseArgs, recoverLeakedToolCalls } from '../core/tools.js';
+import { jsonSchemaOf, wantsJson } from '../core/schema.js';
 import type { ToolCall } from '../types/index.js';
 import { parseNDJSON } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
@@ -269,7 +270,7 @@ export class OllamaProvider extends BaseProvider {
         stream,
         ...(request.tools?.length && { tools: openaiTools(request.tools) }),
         think: request.reasoning ?? false,
-        ...(request.jsonMode && { format: 'json' }),
+        ...(wantsJson(request) && { format: jsonSchemaOf(request.schema) ?? 'json' }),
         options: {
           temperature: request.temperature ?? 0.7,
           ...(request.maxTokens !== undefined && { num_predict: request.maxTokens }),

@@ -623,7 +623,7 @@ if a 2.0 is not ready.
 
 - [x] `messages[]` with image parts; `history` deprecated (2026-09-13: `prompt` optional, `Message` union without tool roles yet — those land with tool calling; `.` is 14.9 kB gz after this)
 - [x] Tool calling on OpenAI-compatible, Anthropic, Gemini, Ollama; `maxSteps` loop in `core/tools.ts` (2026-09-13). Deviations: `tool` messages carry `name` (Gemini and Ollama key results by name, not id); leaked `<function=>` recovery is on whenever `tools` are offered, no flag, one-shot only (a stream has already shown the text); no `capabilities()` probe yet, Ollama's own 400 maps to `UNSUPPORTED`. Stream loop yields intermediate calls as `{ text: '', toolCalls }` until typed chunks land. `.` is 17.1 kB gz after this; dropping provider re-exports from `.` is now due.
-- [ ] `schema` via Standard Schema / JSON Schema; `object` on response; `SCHEMA_MISMATCH` / `INVALID_JSON`
+- [x] `schema` via Standard Schema / JSON Schema; `object` on response; `SCHEMA_MISMATCH` / `INVALID_JSON` (2026-09-13). `object` is `unknown`, not inferred from the schema's output type; a plain JSON Schema is sent but not validated locally (no validator, zero deps); streams ignore `schema`. `./core` + `./openai` is 12,058 B gz after this.
 - [ ] Typed stream chunks; `legacyChunks` flag
 - [ ] `discover` default flips to `'lazy'`
 - [ ] Reasoning/thinking chunks: Ollama `message.thinking`, Anthropic `thinking` blocks, OpenAI `reasoning` → `{ type: 'reasoning' }` stream chunks; today they are dropped and a thinking model can return empty `text` with `finishReason: 'length'`.

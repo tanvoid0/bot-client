@@ -2,6 +2,7 @@ import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishRe
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, textOf, totalTokens } from './base-provider.js';
 import { parseArgs } from '../core/tools.js';
+import { jsonSchemaOf, wantsJson } from '../core/schema.js';
 import type { ToolCall } from '../types/index.js';
 import { parseSSE } from '../core/http.js';
 
@@ -173,7 +174,11 @@ export class AnthropicProvider extends BaseProvider {
       tools: request.tools.map((t) => ({ name: t.name, ...(t.description && { description: t.description }), input_schema: t.parameters })),
       ...(request.toolChoice && { tool_choice: toolChoiceOf(request.toolChoice) }),
     };
-    if (request.jsonMode) systemParts.push(JSON_NUDGE);
+    if (wantsJson(request)) {
+      // No native JSON mode on the Messages API: ask, and show the schema when there is one.
+      const schema = jsonSchemaOf(request.schema);
+      systemParts.push(schema ? `${JSON_NUDGE} The JSON must match this JSON Schema: ${JSON.stringify(schema)}` : JSON_NUDGE);
+    }
     const system = systemParts.join(SYSTEM_JOINER);
     const maxTokens = request.maxTokens ?? 4096;
     // Extended thinking needs a budget of at least 1024 below max_tokens and

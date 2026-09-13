@@ -76,6 +76,25 @@ export type Message =
   | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
   | { role: 'tool'; toolCallId: string; name: string; content: string };
 
+/**
+ * The Standard Schema interface (https://standardschema.dev) that Zod, Valibot,
+ * ArkType and others implement; `jsonSchema` is the Standard JSON Schema
+ * extension some of them add.
+ */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  '~standard': {
+    version: 1;
+    vendor: string;
+    validate: (value: unknown) => StandardResult<Output> | Promise<StandardResult<Output>>;
+    types?: { input: Input; output: Output };
+    jsonSchema?: { input?: (options: { target: string }) => Record<string, unknown> };
+  };
+}
+
+export type StandardResult<T> =
+  | { value: T; issues?: undefined }
+  | { issues: ReadonlyArray<{ message: string; path?: ReadonlyArray<PropertyKey | { key: PropertyKey }> }> };
+
 /** A function the model may call. With `execute`, the factory runs it when `maxSteps > 1`. */
 export interface Tool {
   name: string;
@@ -120,7 +139,14 @@ export interface AIRequest {
   systemPrompt?: string;
   /** Ask the provider for JSON. Providers that support a native JSON mode use it. */
   jsonMode?: boolean;
-  /** Optional response schema, passed through when the provider supports one. */
+  /**
+   * Structured output: a JSON Schema object, or any Standard Schema (Zod,
+   * Valibot, ArkType, ...). Implies `jsonMode`. The answer is parsed (and, for
+   * a Standard Schema, validated) onto `response.object`; a bad answer fails
+   * with `INVALID_JSON` or `SCHEMA_MISMATCH`. Not applied to streams.
+   */
+  schema?: StandardSchemaV1 | Record<string, unknown>;
+  /** @deprecated Use `schema`. Gemini-only passthrough; removed in 3.0. */
   responseSchema?: unknown;
   /** @deprecated Use `messages`; ignored when `messages` is given. Removed in 3.0. */
   history?: ConversationHistory[];
@@ -174,6 +200,8 @@ export interface AIResponse {
   modelUsed?: string;
   providerId?: string;
   finishReason?: FinishReason;
+  /** The parsed (and validated) answer when `schema` was given. */
+  object?: unknown;
   /** Calls the model wants made; `finishReason` is `'tool_calls'`. Absent when there are none. */
   toolCalls?: ToolCall[];
   /** The rounds the factory ran before this answer, when `maxSteps > 1` and at least one tool ran. */

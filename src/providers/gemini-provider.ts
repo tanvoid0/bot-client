@@ -2,6 +2,7 @@ import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishRe
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, textOf as messageText } from './base-provider.js';
 import { parseArgs } from '../core/tools.js';
+import { jsonSchemaOf, wantsJson } from '../core/schema.js';
 import type { ToolCall } from '../types/index.js';
 import { parseSSE } from '../core/http.js';
 
@@ -194,8 +195,10 @@ export class GeminiProvider extends BaseProvider {
       generationConfig: {
         maxOutputTokens: request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: request.temperature ?? 0.7,
-        ...(request.jsonMode && { responseMimeType: 'application/json' }),
-        ...(request.responseSchema !== undefined && { responseSchema: request.responseSchema }),
+        ...(wantsJson(request) && { responseMimeType: 'application/json' }),
+        ...((jsonSchemaOf(request.schema) ?? request.responseSchema) !== undefined && {
+          responseSchema: jsonSchemaOf(request.schema) ?? request.responseSchema,
+        }),
         ...(request.reasoning && { thinkingConfig: { includeThoughts: true } }),
       },
     };

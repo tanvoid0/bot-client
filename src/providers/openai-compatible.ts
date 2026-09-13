@@ -2,6 +2,7 @@ import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishRe
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, totalTokens } from './base-provider.js';
 import { openaiToolChoice, openaiTools, parseArgs, recoverLeakedToolCalls, stringifyArgs } from '../core/tools.js';
+import { jsonSchemaOf, wantsJson } from '../core/schema.js';
 import type { ToolCall } from '../types/index.js';
 import { parseSSE } from '../core/http.js';
 import { splitThinkTags, ThinkFilter } from '../core/reasoning.js';
@@ -173,7 +174,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
         }),
         ...(maxTokens !== undefined && { max_tokens: maxTokens }),
         temperature: request.temperature ?? 0.7,
-        ...(request.jsonMode && { response_format: { type: 'json_object' } }),
+        ...(wantsJson(request) && { response_format: responseFormat(request) }),
         ...(stream && { stream: true }),
         ...(stream && this.cfg.streamUsage !== false && { stream_options: { include_usage: true } }),
       },
@@ -306,6 +307,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
 function toolCallsOf(raw: unknown): ToolCall[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((t, i) => ({ id: t?.id ?? `call_${i}`, name: t?.function?.name ?? '', arguments: parseArgs(t?.function?.arguments) }));
+}
+
+/** `json_schema` when the request carries a JSON form of its schema, plain `json_object` otherwise. */
+function responseFormat(request: AIRequest): Record<string, unknown> {
+  const schema = jsonSchemaOf(request.schema);
+  return schema ? { type: 'json_schema', json_schema: { name: 'response', schema } } : { type: 'json_object' };
 }
 
 /** DeepSeek, vLLM and llama.cpp use `reasoning_content`; OpenRouter and LM Studio use `reasoning`. */

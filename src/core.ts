@@ -13,6 +13,7 @@ export type { HttpOptions, SseEvent, FetchLike } from './core/http.js';
 export { guessProvider } from './core/catalog.js';
 export { splitThinkTags, ThinkFilter } from './core/reasoning.js';
 export { openaiTools, parseArgs, recoverLeakedToolCalls, runTools, nextStepRequest } from './core/tools.js';
+export { jsonSchemaOf, parseJson, isStandardSchema } from './core/schema.js';
 export type { RetryOptions } from './core/retry.js';
 
 // Types for requests, responses, and configuration
@@ -27,6 +28,7 @@ export type {
   ToolCall,
   ToolResult,
   Step,
+  StandardSchemaV1,
   AIResponse,
   AIStreamChunk,
   AIFactoryConfig,
