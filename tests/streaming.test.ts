@@ -7,11 +7,15 @@ import type { AIStreamChunk } from '../src/index.js';
 /** Feeds bytes in exactly the pieces given, framing be damned. */
 const chunked = (pieces: string[]) => Readable.from(pieces.map((p) => Buffer.from(p)));
 
-/** `fetch` answering 200 with the pieces as the streamed body. */
+/** `fetch` answering 200 with the pieces as the streamed body. (A hand-rolled ReadableStream: `Readable.toWeb` misbehaves on Node 18.) */
 function stubStream(pieces: string[]) {
-  return jest
-    .spyOn(globalThis, 'fetch')
-    .mockResolvedValue(new Response(Readable.toWeb(chunked(pieces)) as any, { status: 200 }));
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const p of pieces) controller.enqueue(Buffer.from(p));
+      controller.close();
+    },
+  });
+  return jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
 }
 
 afterEach(() => {

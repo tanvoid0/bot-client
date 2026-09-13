@@ -84,5 +84,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "module": "dist/index.js"
+  "module": "dist/index.js",
+  "overrides": {
+    "minimatch@9": "^9.0.7"
+  }
 }
