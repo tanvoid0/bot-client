@@ -661,6 +661,10 @@ Agent cap per user rules: at most 4 concurrent; run gates (`npm run build && npm
 
 ---
 
+### Shim sunset (3.0)
+
+`@tanvoid0/bot-client` is a generated re-export of `llmwire`, promised for one major. At 3.0: stop publishing the shim, `npm deprecate @tanvoid0/bot-client "renamed to llmwire"`, drop `scripts/build-shim.mjs` and the shim step in `ci.yml`.
+
 ## 12. README update checklist (run after each phase lands)
 
 Tick when the README reflects reality. Do not tick early; the README is the product page.

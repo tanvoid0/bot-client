@@ -1,7 +1,8 @@
 /**
  * Cost estimate from `usage` and a dated price table. USD per million
- * tokens, list prices for the vendors' own APIs; a reseller (OpenRouter,
- * Bedrock, Vertex) prices differently. `undefined` for a model not in the
+ * tokens, list prices for the vendors' own APIs (Anthropic, OpenAI, Google,
+ * DeepSeek, xAI, Mistral); a reseller (OpenRouter, Bedrock, Vertex, Groq's
+ * hosted open models) prices differently. `undefined` for a model not in the
  * table, never a guess. Extend or override with your own table.
  */
 import type { TokenUsage } from '../types/index.js';
@@ -14,7 +15,7 @@ export interface Price {
 }
 
 /** When the table was last checked against the vendors' pricing pages. */
-export const PRICES_DATE = '2026-09-13';
+export const PRICES_DATE = '2026-09-14';
 
 /** Keys are model id prefixes; the longest matching prefix wins, so `gpt-5-mini` beats `gpt-5`. */
 export const PRICES: Record<string, Price> = {
@@ -59,6 +60,24 @@ export const PRICES: Record<string, Price> = {
   'gemini-2.5-flash': { input: 0.3, output: 2.5, cached: 0.03 },
   'gemini-2.5-flash-lite': { input: 0.1, output: 0.4, cached: 0.01 },
   'gemini-embedding-2': { input: 0.2, output: 0 },
+  // DeepSeek (off-peak list; peak hours are double)
+  'deepseek-flash': { input: 0.15, output: 0.6, cached: 0.003 },
+  'deepseek-v4-pro': { input: 0.66, output: 1.98, cached: 0.022 },
+  // xAI (prompts < 200k tokens)
+  'grok-4.6': { input: 2, output: 6, cached: 0.5 },
+  'grok-4.5': { input: 2, output: 6, cached: 0.3 },
+  'grok-4.3': { input: 1.25, output: 2.5, cached: 0.2 },
+  'grok-4.20': { input: 1.25, output: 2.5, cached: 0.2 },
+  'grok-build': { input: 1, output: 2, cached: 0.2 },
+  // Mistral
+  'mistral-large': { input: 0.5, output: 1.5 },
+  'mistral-medium': { input: 1.5, output: 7.5 },
+  'mistral-small': { input: 0.15, output: 0.6 },
+  codestral: { input: 0.3, output: 0.9 },
+  'ministral-3b': { input: 0.1, output: 0.1 },
+  'ministral-8b': { input: 0.15, output: 0.15 },
+  'ministral-14b': { input: 0.2, output: 0.2 },
+  'mistral-embed': { input: 0.1, output: 0 },
 };
 
 /** The price row for a model id, by longest matching prefix (an explicit `vendor/` prefix is ignored). */

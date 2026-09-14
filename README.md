@@ -268,7 +268,7 @@ const res = await aiFactory.process({ prompt, modelId: 'gpt-4o' });
 estimateCost(res.usage, res.modelUsed!); // USD, or undefined for a model not in the table
 ```
 
-List prices for Anthropic, OpenAI and Google models, USD per million tokens, cached prompt tokens at the cache price; `PRICES_DATE` says when the table was last checked. Pass your own table as the third argument for other hosts or negotiated rates. Never a guess: unknown model, `undefined`.
+List prices for Anthropic, OpenAI, Google, DeepSeek, xAI and Mistral models, USD per million tokens, cached prompt tokens at the cache price; `PRICES_DATE` says when the table was last checked. Pass your own table as the third argument for other hosts or negotiated rates. Never a guess: unknown model, `undefined`.
 
 ---
 
