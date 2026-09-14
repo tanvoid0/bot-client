@@ -112,7 +112,8 @@ export function transcript(res: AIResponse): Message[] {
     out.push({ role: 'assistant', content: step.text, toolCalls: step.toolCalls });
     for (const r of step.toolResults) out.push({ role: 'tool', toolCallId: r.toolCallId, name: r.name, content: toolResultContent(r) });
   }
-  out.push({ role: 'assistant', content: res.data ?? '', ...(res.toolCalls?.length && { toolCalls: res.toolCalls }) });
+  // Calls the loop did not run (no `execute`, or `maxSteps` reached) are not stored: a call without its result is a request most hosts reject.
+  out.push({ role: 'assistant', content: res.data ?? '' });
   return out;
 }
 

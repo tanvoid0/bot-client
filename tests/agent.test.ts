@@ -187,8 +187,9 @@ describe('Session', () => {
     expect(seen[1]).toMatchObject({ maxSteps: 1, tools: undefined });
   });
 
-  test('transcript of a plain answer is one assistant message', () => {
+  test('transcript of a plain answer is one assistant message; unrun calls are not stored', () => {
     expect(transcript(ok('hi'))).toEqual([{ role: 'assistant', content: 'hi' }]);
+    expect(transcript(ok('', { finishReason: 'tool_calls', toolCalls: [call('t')] }))).toEqual([{ role: 'assistant', content: '' }]);
   });
 });
 
@@ -376,6 +377,13 @@ describe('factory concurrency', () => {
       for await (const _ of factory.processStream({ prompt: 'x' })) void _;
     };
     await Promise.all([...Array(5)].flatMap(() => [factory.process({ prompt: 'x' }), drain()]));
+    expect(peak).toBe(2);
+    // a newcomer arriving as a slot is released does not cut in front of a waiter
+    peak = 0;
+    const waiters = [...Array(4)].map(() => factory.process({ prompt: 'x' }));
+    await new Promise((r) => setTimeout(r, 12));
+    waiters.push(factory.process({ prompt: 'x' }));
+    await Promise.all(waiters);
     expect(peak).toBe(2);
   });
 });

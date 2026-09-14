@@ -41,14 +41,19 @@ export class AIFactory {
   private async acquire(): Promise<void> {
     const max = this.config.concurrency;
     if (!max) return;
-    if (this.active >= max) await new Promise<void>((resolve) => this.waiters.push(resolve));
-    this.active++;
+    if (this.active < max) {
+      this.active++;
+      return;
+    }
+    // The releasing call hands its slot straight to us, so `active` never dips and lets a newcomer cut in.
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
   }
 
   private release(): void {
     if (!this.config.concurrency) return;
-    this.active--;
-    this.waiters.shift()?.();
+    const next = this.waiters.shift();
+    if (next) next();
+    else this.active--;
   }
 
   /**

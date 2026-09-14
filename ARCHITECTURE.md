@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1–5 done; 2.0.0 released as `llmwire` with the `@tanvoid0/bot-client` shim, 2.1.0 (agent layer) unreleased on main (all 2026-09-13). Next: release 2.1.0, then Phase 6 (routines).
+Status: Phases 1–5 done; 2.0.0 released as `llmwire` with the `@tanvoid0/bot-client` shim, 2.1.0 (agent layer) released 2026-09-14. Next: Phase 6 (routines, 2.2.0).
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
