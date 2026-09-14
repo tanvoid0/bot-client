@@ -1,4 +1,13 @@
-# llmwire
+<p align="center">
+  <a href="https://tanvoid0.github.io/llmwire/"><img src="site/logo.svg" alt="llmwire" width="340" height="80"></a>
+</p>
+
+<p align="center">
+  <a href="https://tanvoid0.github.io/llmwire/">Docs</a> ·
+  <a href="https://tanvoid0.github.io/llmwire/documents/Examples.html">Examples</a> ·
+  <a href="https://tanvoid0.github.io/llmwire/modules.html">API</a> ·
+  <a href="https://www.npmjs.com/package/llmwire">npm</a>
+</p>
 
 [![CI/CD Pipeline](https://github.com/tanvoid0/llmwire/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/tanvoid0/llmwire/actions)
 [![npm version](https://img.shields.io/npm/v/llmwire.svg)](https://www.npmjs.com/package/llmwire)
@@ -6,7 +15,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![bundle size](https://img.shields.io/badge/core%20%2B%20one%20provider-12.4%20kB%20gz-blue)
 ![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
-[![API docs](https://img.shields.io/badge/API%20docs-typedoc-blue)](https://tanvoid0.github.io/llmwire/)
 
 Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them; plus agents, an MCP client, sessions, embeddings and routines as separate entries.
 
