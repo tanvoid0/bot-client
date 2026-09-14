@@ -79,8 +79,9 @@ export function load(app) {
     const page = ctx.page;
     const isIndex = page.url === 'index.html';
     const title = isIndex ? `${pkg.name} — ${pkg.description.split('.')[0]}` : `${page.model.name} · ${pkg.name}`;
-    const url = base + (isIndex ? '' : page.url); // typedoc emits canonical itself
+    const url = base + (isIndex ? '' : page.url);
     const tags = [
+      ...(isIndex ? [] : [h('link', { rel: 'canonical', href: url })]), // typedoc emits index's own
       h('meta', { name: 'keywords', content: (pkg.keywords ?? []).join(', ') }),
       h('meta', { property: 'og:type', content: 'website' }),
       h('meta', { property: 'og:site_name', content: pkg.name }),
