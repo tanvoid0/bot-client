@@ -394,9 +394,11 @@ Streaming rule: retry and fallback only run before the first chunk arrives. Once
 | Memory for a 1 MB streamed answer | flat (about 0.3 MB heap delta; chunks are yielded, never accumulated) |
 | Cold import of the core entry | 10.8 ms median, zero network calls (all of it Node's module loader) |
 | First-request network calls with `discover: 'lazy'` and a routable `modelId` | 1 (the completion itself) |
+| SSE frame parse | 0.6–1.2 µs per event, 64 B to 16 kB socket chunks |
+| Model routing (`guessProvider`) | 0.05 µs |
 | Published size (minified, gz) | `.` entry 18.0 kB; `./core` + one provider 12.4 kB; one provider subpath 7.2–7.9 kB; `./mcp` 4.3 kB, `./session` 1.2 kB, `./cost` 0.7 kB |
 
-Measured with `npm run bench` on Node 24.14, 2026-09-14, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
+Measured with `npm run bench` on Node 24.14, 2026-09-14, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method, per-entry sizes and caveats. Cold import is Node's module loader end to end; the library's own top-level code is under 0.5 ms.
 
 ## Comparison
 
