@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2.2.0
+
+### Added
+
+- `llmwire/routine`: `Routine({ name, every, run, store?, onResult?, onError?, timeout?, catchUp? })` runs a job on an interval (`'15m'`, ms) or a 5-field cron (local time) with `setTimeout`; `start`, `stop` (aborts the run's `signal`), `runNow`, `next`, `state`. A run that overruns its slot skips the next tick. A `Store` keeps `lastRunAt` / `lastResult` / `lastError`; `catchUp` runs once on start when the last run is stale. `nextRun`, `parseCron`, `parseDuration` exported.
+- `npx llmwire routine run <file> [name...]`: imports the file and runs each exported routine once, for system cron and systemd timers.
+- `Store` and `MemoryStore` from `llmwire/session` are generic (`Store<T = Message[]>`).
+
 ## [2.1.0] - 2026-09-14
 
 Additive. Six new entries, none imported by the core; `.` and `./core` sizes are unchanged.

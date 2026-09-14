@@ -39,6 +39,6 @@ report(
 for (const p of ['openai-compatible', 'openai-provider', 'anthropic-provider', 'gemini-provider', 'ollama-provider', 'lmstudio-provider']) {
   report(`providers/${p}.js`, `providers/${p}.js`);
 }
-for (const a of ['agent', 'session', 'mcp', 'embed', 'cost']) {
+for (const a of ['agent', 'session', 'mcp', 'embed', 'cost', 'routine']) {
   report(`agent/${a}.js (./${a})`, `agent/${a}.js`);
 }

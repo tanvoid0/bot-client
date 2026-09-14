@@ -201,7 +201,7 @@ describe('entry purity', () => {
     buildSync({ entryPoints: [entry], bundle: true, platform: 'browser', format: 'esm', write: false, logLevel: 'silent' }).outputFiles[0].text;
 
   test('the main entry and every provider subpath bundle for the browser with no node built-ins', () => {
-    for (const entry of ['src/index.ts', 'src/core.ts', 'src/providers/openai-provider.ts', 'src/providers/anthropic-provider.ts', 'src/providers/gemini-provider.ts', 'src/providers/ollama-provider.ts', 'src/providers/lmstudio-provider.ts', 'src/providers/openai-compatible.ts', 'src/agent/agent.ts', 'src/agent/session.ts', 'src/agent/mcp.ts', 'src/agent/embed.ts', 'src/agent/cost.ts']) {
+    for (const entry of ['src/index.ts', 'src/core.ts', 'src/providers/openai-provider.ts', 'src/providers/anthropic-provider.ts', 'src/providers/gemini-provider.ts', 'src/providers/ollama-provider.ts', 'src/providers/lmstudio-provider.ts', 'src/providers/openai-compatible.ts', 'src/agent/agent.ts', 'src/agent/session.ts', 'src/agent/mcp.ts', 'src/agent/embed.ts', 'src/agent/cost.ts', 'src/agent/routine.ts']) {
       const out = bundle(entry);
       expect(out).not.toMatch(/child_process|["']node:|require\(["']fs["']\)/);
     }

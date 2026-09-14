@@ -176,6 +176,17 @@
         "default": "./dist/cjs/agent/cost.js"
       },
       "default": "./dist/agent/cost.js"
+    },
+    "./routine": {
+      "import": {
+        "types": "./dist/agent/routine.d.ts",
+        "default": "./dist/agent/routine.js"
+      },
+      "require": {
+        "types": "./dist/cjs/agent/routine.d.ts",
+        "default": "./dist/cjs/agent/routine.js"
+      },
+      "default": "./dist/agent/routine.js"
     }
   },
   "scripts": {
@@ -246,7 +257,10 @@
     "agents",
     "multi-agent",
     "embeddings",
-    "rag"
+    "rag",
+    "scheduler",
+    "cron",
+    "routines"
   ],
   "author": "tanvoid0",
   "license": "MIT",
@@ -332,6 +346,9 @@
       ],
       "cost": [
         "dist/agent/cost.d.ts"
+      ],
+      "routine": [
+        "dist/agent/routine.d.ts"
       ]
     }
   }

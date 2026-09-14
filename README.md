@@ -8,7 +8,7 @@
 ![runtimes](https://img.shields.io/badge/runs%20on-Node%20%C2%B7%20Bun%20%C2%B7%20Deno%20%C2%B7%20Workers%20%C2%B7%20browsers-blue)
 [![API docs](https://img.shields.io/badge/API%20docs-typedoc-blue)](https://tanvoid0.github.io/llmwire/)
 
-Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them; plus agents, an MCP client, sessions and embeddings as separate entries.
+Zero-dependency TypeScript LLM client for OpenAI, Anthropic, Gemini, **Ollama**, LM Studio, Groq, OpenRouter, DeepSeek, Mistral, xAI, Together and any OpenAI-compatible API, with real streaming, tool calling, structured output, images and typed provider errors on every one of them; plus agents, an MCP client, sessions, embeddings and routines as separate entries.
 
 ## Why llmwire
 
@@ -35,7 +35,7 @@ The main entry exports everything and is edge/browser safe. `/core` plus one pro
 import { AIFactory } from 'llmwire/core';               // factory, errors, types; no built-in providers (pass `providers`)
 import { OpenAIProvider } from 'llmwire/openai';        // also /anthropic /gemini /ollama /lmstudio /openai-compatible
 import { runOllamaCLI } from 'llmwire/ollama-cli';      // spawns the `ollama` binary (Node only)
-import { Agent, handoff } from 'llmwire/agent';         // also /session /mcp /embed /cost; /mcp-stdio is Node only
+import { Agent, handoff } from 'llmwire/agent';         // also /session /mcp /embed /cost /routine; /mcp-stdio is Node only
 ```
 
 ## Quick start
@@ -235,6 +235,30 @@ cosine(embeddings[0], embeddings[1]); // 0.8…
 
 OpenAI-format `/embeddings` (OpenAI and any compatible host via `baseURL`), Gemini `batchEmbedContents`, Ollama `/api/embed`; the provider is picked from the model id unless given. Keys come from `OPENAI_API_KEY` / `GEMINI_API_KEY` or `{ apiKey }`.
 
+## Routines
+
+A `Routine` runs a job on an interval or a 5-field cron, in this process, with `setTimeout`.
+
+```typescript
+import { Routine } from 'llmwire/routine';
+import { MemoryStore } from 'llmwire/session';
+
+const digest = new Routine({
+  name: 'daily-digest',
+  every: '0 8 * * *',                          // 5-field cron (local time), or '15m' / '2h' / ms
+  run: ({ signal }) => agent.run('Summarize yesterday', { signal }),
+  store: new MemoryStore(),                    // keeps lastRunAt / lastResult across restarts
+  catchUp: true,                               // on start, run at once if the last run is older than a period
+  timeout: 120_000,                            // aborts the run's signal, reports TIMEOUT
+  onResult: (r) => console.log(r.data),
+  onError: (e) => console.error(e.code, e.message),
+});
+await digest.start();   // digest.stop() cancels the next tick and aborts a run in progress
+await digest.runNow();  // once, outside the schedule
+```
+
+A run that overruns its slot skips the next tick rather than queueing it. Cron is minute, hour, day-of-month, month, day-of-week with `*`, lists, ranges and steps; not a distributed scheduler, several instances need a lock in their own `Store`. For system cron or a systemd timer, `npx llmwire routine run ./routines.js` imports the file and runs each exported routine once.
+
 ## Cost
 
 ```typescript
@@ -392,6 +416,7 @@ Snapshot taken 2026-09-13 from each project's public docs; corrections welcome a
 | Agent class / multi-agent | `Agent`, agents as tools | no | no | no | **yes**: `Agent`, `asTool`, `handoff`, `Session` |
 | MCP client | via `@modelcontextprotocol/sdk` | no | no | no | **yes**, no SDK: Streamable HTTP and stdio |
 | Embeddings | yes | no | yes | yes | **yes** (OpenAI-format, Gemini, Ollama) + `cosine` |
+| Scheduled routines | no (host feature) | no | no | no | **yes**: interval or cron, in-process, `Store`-backed |
 | Local-first (Ollama, LM Studio) zero config | no | no | partial | yes | **yes** |
 | Ollama management (pull/list/rm/ps) | no | no | no | no | **yes** |
 | npx CLI | no | no | no | no | **yes** (`doctor`, models, keys) |
@@ -671,6 +696,7 @@ Hooks are awaited; `onResponse` gets the `AIResponse`, or the `done` chunk for a
 - **Session** (`/session`): `new Session({ id, store?, maxTokens?, summarize?, toolResultChars? })`; `send(agent, input, overrides?)`, `messages()`, `clear()`, `estimateTokens()`; `Store` is `{ get(id), set(id, messages), delete?(id) }`; `MemoryStore`; `transcript(response)` → `Message[]`
 - **McpClient** (`/mcp`): `McpClient.connect({ url, headers?, fetch?, signal? } | { transport })`; `tools()` → `Tool[]`, `listTools()`, `callTool(name, args)`, `resources()`, `readResource(uri)`, `prompts()`, `getPrompt(name, args?)`, `ping()`, `call(method, params)`, `close()`; `McpStdioTransport({ command, args?, env?, cwd?, timeout? })` from `/mcp-stdio`
 - **embed** (`/embed`): `embed(texts, { model, provider?, baseURL?, apiKey?, headers?, fetch?, signal?, timeout?, dimensions? })` → `{ embeddings: number[][], usage? }`; `cosine(a, b)`
+- **Routine** (`/routine`): `new Routine({ name, every, run({ signal, lastRunAt }), store?, onResult?, onError?, timeout?, catchUp? })`; `start()`, `stop()`, `runNow()`, `next(from?)`, `state()`; `nextRun(every, from)`, `parseCron`, `parseDuration`
 - **cost** (`/cost`): `estimateCost(usage, model, table?)` → USD | `undefined`; `priceOf(model, table?)`; `PRICES`, `PRICES_DATE`
 - **Logger**: optional `debug`, `info`, `warn`, `error` (all `(message, ...args) => void`)
 - **AIError**: see [Errors](#errors)

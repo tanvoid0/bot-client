@@ -7,20 +7,21 @@ import type { Agent, AgentResult } from './agent.js';
 import { toolResultContent } from '../core/tools.js';
 import type { AIRequest, AIResponse, Message } from '../types/index.js';
 
-export interface Store {
-  get(id: string): Promise<Message[] | undefined>;
-  set(id: string, messages: Message[]): Promise<void>;
+/** Where a session (or a routine, see `./routine`) keeps its state, keyed by id. */
+export interface Store<T = Message[]> {
+  get(id: string): Promise<T | undefined>;
+  set(id: string, value: T): Promise<void>;
   delete?(id: string): Promise<void>;
 }
 
 /** In-process store; a Redis, SQLite or file store is the same three methods. */
-export class MemoryStore implements Store {
-  private readonly data = new Map<string, Message[]>();
-  async get(id: string): Promise<Message[] | undefined> {
+export class MemoryStore<T = Message[]> implements Store<T> {
+  private readonly data = new Map<string, T>();
+  async get(id: string): Promise<T | undefined> {
     return this.data.get(id);
   }
-  async set(id: string, messages: Message[]): Promise<void> {
-    this.data.set(id, messages);
+  async set(id: string, value: T): Promise<void> {
+    this.data.set(id, value);
   }
   async delete(id: string): Promise<void> {
     this.data.delete(id);

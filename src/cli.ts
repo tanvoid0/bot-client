@@ -7,6 +7,8 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { pathToFileURL } from 'url';
+import type { Routine } from './agent/routine.js';
 import { OllamaProvider } from './providers/ollama-provider.js';
 import { OpenAIProvider } from './providers/openai-provider.js';
 import { AnthropicProvider } from './providers/anthropic-provider.js';
@@ -64,12 +66,19 @@ Usage:
   npx llmwire ollama <command> [args...]
   npx llmwire keys <command> [args...]
   npx llmwire doctor [provider...]
+  npx llmwire routine run <file> [name...]
   npx llmwire help
 
 Doctor:
   Lists each provider's models, then sends it a one-line prompt and prints
   the model that answered or the classified error. Built-ins by default;
   name presets (groq, openrouter, deepseek, mistral, xai, together) to add them.
+
+Routine:
+  run <file> [name...]  Import <file> (its default export: a Routine, or an
+                        array/object of them), run each once with runNow(),
+                        exit 0 when all succeeded. For system cron / systemd
+                        timers; names filter which ones run.
 
 Ollama commands (uses local API when server is up, else ollama CLI):
   list, ls          List models
@@ -302,6 +311,34 @@ async function runDoctor(argv: string[]): Promise<number> {
   return rows.some((r) => r.ok) ? 0 : 1;
 }
 
+async function runRoutine(argv: string[]): Promise<number> {
+  const [cmd, file, ...names] = argv;
+  if (cmd !== 'run' || !file) {
+    console.error('Usage: npx llmwire routine run <file> [name...]');
+    return 1;
+  }
+  const mod = await import(pathToFileURL(resolve(file)).href);
+  const exported = mod.default ?? mod;
+  const all: Routine[] = (Array.isArray(exported) ? exported : typeof exported.runNow === 'function' ? [exported] : Object.values(exported)).filter((r: any) => typeof r?.runNow === 'function');
+  const picked = names.length ? all.filter((r) => names.includes(r.name)) : all;
+  if (!picked.length) {
+    console.error(`No routines found in ${file}${names.length ? ` named ${names.join(', ')}` : ''}`);
+    return 1;
+  }
+  let failed = 0;
+  for (const r of picked) {
+    const started = Date.now();
+    try {
+      await r.runNow();
+      console.log(`${r.name}: ok (${Date.now() - started} ms)`);
+    } catch (err) {
+      failed++;
+      console.error(`${r.name}: ${String(err)}`);
+    }
+  }
+  return failed ? 1 : 0;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const top = argv[0]?.toLowerCase();
@@ -315,6 +352,7 @@ async function main(): Promise<number> {
   if (top === 'ollama') return runOllama(rest);
   if (top === 'keys') return runKeys(rest);
   if (top === 'doctor') return runDoctor(rest);
+  if (top === 'routine') return runRoutine(rest);
 
   console.error('Unknown command:', top);
   printHelp();

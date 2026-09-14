@@ -29,6 +29,7 @@
     "**/tests/messages.test.ts",
     "**/tests/tools.test.ts",
     "**/tests/schema.test.ts",
-    "**/tests/agent.test.ts"
+    "**/tests/agent.test.ts",
+    "**/tests/routine.test.ts"
   ]
 }

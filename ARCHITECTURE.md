@@ -4,7 +4,7 @@ Planning document. Goal: make `@tanvoid0/bot-client` a credible alternative to
 Vercel AI SDK, token.js, multi-llm-ts and llm.js for people who want one small,
 zero-dependency client for many LLM providers.
 
-Status: Phases 1–5 done; 2.0.0 released as `llmwire` with the `@tanvoid0/bot-client` shim, 2.1.0 (agent layer) released 2026-09-14. Next: Phase 6 (routines, 2.2.0).
+Status: Phases 1–5 done; 2.0.0 released as `llmwire` with the `@tanvoid0/bot-client` shim, 2.1.0 (agent layer) released 2026-09-14; Phase 6 (routines) on main, unreleased. Next: release 2.2.0. Roadmap complete after that.
 Last updated 2026-09-13 against v1.8.0.
 
 ## 0. Next session starts here
@@ -39,7 +39,7 @@ Known gaps: Gemini `reasoning: false` sends nothing (2.5 Pro cannot disable thin
 | Edge / browser / Workers | yes | yes | yes | yes | **no** (`child_process`, `string_decoder`) |
 | Agent loop / multi-agent | `Agent` class, agents as tools | no | no | no | no |
 | MCP client | via `@modelcontextprotocol/sdk` (deps) | no | no | no | no |
-| Scheduled routines | no (host feature) | no | no | no | no |
+| Scheduled routines | no (host feature) | no | no | no | **yes**: interval or cron, in-process, `Store`-backed |
 | Embeddings | yes | no | yes | yes | no |
 | Local-first (Ollama, LM Studio) zero config | no | no | partial | yes | **yes** |
 | Ollama management (pull/list/rm/ps) | no | no | no | no | **yes** |
@@ -652,9 +652,9 @@ if a 2.0 is not ready.
 
 ### Phase 6 — routines (2.2.0, additive)
 
-- [ ] `./routine`: interval + 5-field cron, overlap guard, `Store` persistence, `catchUp`
-- [ ] Fake-timer tests for cron next-run, overlap skip, catch-up
-- [ ] `bot-client routine run <file>` CLI helper (node-only) for cron/systemd users
+- [x] `./routine`: interval + 5-field cron, overlap guard, `Store` persistence, `catchUp` (2026-09-14; cron is local time, numbers only, minute stepping with day/month skips; a scheduled tick that fails without `onError` is logged, `runNow` rethrows)
+- [x] Fake-timer tests for cron next-run, overlap skip, catch-up (2026-09-14, `tests/routine.test.ts`)
+- [x] `llmwire routine run <file> [name...]` CLI helper (2026-09-14)
 
 Estimated size: Phase 1 ≈ 600 lines changed, Phase 2 ≈ 400, Phase 3 ≈ 900, Phase 4 docs only, Phase 5 ≈ 700, Phase 6 ≈ 250.
 Agent cap per user rules: at most 4 concurrent; run gates (`npm run build && npm test && npm run lint`) inline between batches.
@@ -712,9 +712,9 @@ Tick when the README reflects reality. Do not tick early; the README is the prod
 - [x] Types block: `Tool.execute` receives `{ signal }`; `AIResponse.steps`, `handedOffTo`
 
 **After Phase 6**
-- [ ] New section "Routines": interval and cron examples, `store`, `catchUp`, "not a distributed scheduler" note
-- [ ] CLI section: `routine run`
-- [ ] Keywords: add `scheduler`, `cron`, `routines`
+- [x] New section "Routines": interval and cron examples, `store`, `catchUp`, "not a distributed scheduler" note
+- [x] CLI section: `routine run`
+- [x] Keywords: add `scheduler`, `cron`, `routines`
 
 ---
 
