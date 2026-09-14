@@ -6,7 +6,7 @@ import { JSX, ReflectionKind, RendererEvent } from 'typedoc';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const desc = pkg.description.split(/(?<=\.)\s/)[0]; // first sentence: snippet length
-const STATIC = ['llms.txt', 'site/robots.txt', ['.github/social-preview.png', 'og.png']];
+const STATIC = ['llms.txt', 'site/robots.txt', 'site/googleef1d699d2592f403.html', ['.github/social-preview.png', 'og.png']];
 
 // Lucide paths (ISC). Stroke colour comes from typedoc's per-kind variables.
 const P = {
