@@ -390,13 +390,13 @@ Streaming rule: retry and fallback only run before the first chunk arrives. Once
 | Metric | Value |
 |---|---|
 | Per-call overhead above raw `fetch` (p50 / p99) | below noise: within 0.2 ms / 1 ms of a bare `fetch` + `res.json()` |
-| Streaming overhead per chunk | 7.6 µs per yielded chunk |
+| Streaming overhead per chunk | 8.4 µs per yielded chunk |
 | Memory for a 1 MB streamed answer | flat (about 0.3 MB heap delta; chunks are yielded, never accumulated) |
-| Cold import of the core entry | 9.8 ms median, zero network calls |
+| Cold import of the core entry | 10.8 ms median, zero network calls (all of it Node's module loader) |
 | First-request network calls with `discover: 'lazy'` and a routable `modelId` | 1 (the completion itself) |
 | Published size (minified, gz) | `.` entry 18.0 kB; `./core` + one provider 12.4 kB; one provider subpath 7.2–7.9 kB; `./mcp` 4.3 kB, `./session` 1.2 kB, `./cost` 0.7 kB |
 
-Measured with `npm run bench` on Node 24.14, 2026-09-13, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
+Measured with `npm run bench` on Node 24.14, 2026-09-14, against a local mock server; see [bench/RESULTS.md](bench/RESULTS.md) for method and caveats.
 
 ## Comparison
 

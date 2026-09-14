@@ -1,5 +1,25 @@
 # Benchmark results
 
+## 2.2.0 — 2026-09-14
+
+Node v24.14.1, local Windows dev machine, `npm run bench`, single run.
+
+| Metric | Target | Result | Pass |
+|---|---|---|---|
+| Per-call overhead above raw `fetch`, p50 / p99 | < 1 ms / < 3 ms | `AIFactory` −0.108 ms / −1.05 ms (within noise of a bare `fetch` + `res.json()`) | yes |
+| Streaming overhead per chunk | < 50 µs | `processStream` 8.4 µs per yielded chunk (raw fetch 16.5 µs per frame, network-bound) | yes |
+| Memory for a 1 MB streamed answer | flat | 300 KB heapUsed delta | yes |
+| Cold `import` of `./core` | < 15 ms, zero network | median 10.8 ms over 5 runs; a CPU profile puts it all in Node's module loader (realpath, compile, link), our own top-level code is under 0.5 ms | yes |
+| Size (min+gz) | `./core` + one provider < 12.5 kB | `.` 18.0 kB; `./core` 10.4 kB; `./core` + `./openai` 12.4 kB; providers 7.2–7.9 kB; `./mcp` 4.3 kB, `./embed` 4.3 kB, `./routine` 3.9 kB, `./session` 1.1 kB, `./cost` 0.7 kB | yes |
+
+Micro (`bench/` scratch, not a script): `parseSSE` 0.6–1.2 µs per event across 64 B to 16 kB socket chunks; `guessProvider` 0.05 µs (hit) / 0.09 µs (miss); `recoverLeakedToolCalls` on a 4 kB answer with no marker 0.08 µs. Nothing on the request path is measurable next to the network.
+
+`./agent` reports 19 kB in `bench:size` because esbuild inlines its dynamic `import('../index.js')` (the shared factory fallback) when bundling without code splitting; with splitting, or in Node, that chunk loads only when an `Agent` is built without a `factory`.
+
+`Routine` cron: `nextRun` is 3 µs for a typical expression; an expression that can never fire (`0 0 31 2 *`) is rejected at construction after a bounded 100 ms scan.
+
+## 1.8.0 — 2026-09-13
+
 Date: 2026-09-13
 Node: v24.14.1
 Machine: local dev machine (Windows), single run per script, see command column.
