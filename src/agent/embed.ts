@@ -1,3 +1,4 @@
+/** @module llmwire/embed */
 /**
  * Embeddings over `fetch`: OpenAI-format `/embeddings` (OpenAI and every
  * compatible host), Gemini `batchEmbedContents`, Ollama `/api/embed`.

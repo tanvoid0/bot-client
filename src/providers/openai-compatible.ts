@@ -1,3 +1,4 @@
+/** @module llmwire/openai-compatible */
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason, TokenUsage } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, firstEnv, inlineImage, mergeBody, partsOf, totalTokens } from './base-provider.js';

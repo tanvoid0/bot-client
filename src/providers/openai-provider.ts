@@ -1,3 +1,4 @@
+/** @module llmwire/openai */
 import { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai-compatible.js';
 
 export interface OpenAIProviderConfig extends Omit<OpenAICompatibleConfig, 'id' | 'name' | 'requireApiKey' | 'apiKeyEnv'> {

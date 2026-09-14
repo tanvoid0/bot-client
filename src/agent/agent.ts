@@ -1,3 +1,4 @@
+/** @module llmwire/agent */
 /**
  * Agent: a name, a model, a system prompt, tools and a step budget, run
  * through the factory's tool loop. Deliberately a config holder with two

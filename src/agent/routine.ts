@@ -1,3 +1,4 @@
+/** @module llmwire/routine */
 /**
  * Routine: a named job on an interval (`'15m'`, `'2h'`, ms) or a 5-field cron
  * (`'0 8 * * *'`, local time), in this process, with `setTimeout`. A run that

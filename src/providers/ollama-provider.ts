@@ -1,3 +1,4 @@
+/** @module llmwire/ollama */
 import type { AIRequest, AIResponse, AIStreamChunk, BaseProviderConfig, FinishReason } from '../types/index.js';
 import type { Refinement } from '../core/errors.js';
 import { BaseProvider, buildChatMessages, inlineImage, mergeBody, textOf, totalTokens } from './base-provider.js';

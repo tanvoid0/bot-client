@@ -1,3 +1,4 @@
+/** @module llmwire/mcp */
 /**
  * MCP client: JSON-RPC 2.0 over Streamable HTTP (`fetch`, any runtime), no
  * SDK. A server's tools come back as `Tool[]` whose `execute` calls

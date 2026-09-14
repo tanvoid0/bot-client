@@ -1,3 +1,4 @@
+/** @module llmwire */
 // The zero-config entry: everything in `./core` plus the built-in providers,
 // with `AIFactory` defaulting to all five when no `providers` are given.
 export * from './core.js';

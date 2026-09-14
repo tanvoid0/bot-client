@@ -3,7 +3,7 @@ name: Docs
 on:
   push:
     branches: [ main ]
-    paths: [ 'src/**', 'README.md', 'typedoc.json', '.github/workflows/docs.yml' ]
+    paths: [ 'src/**', 'site/**', '*.md', 'llms.txt', 'typedoc.json', '.github/workflows/docs.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run docs
-      - run: cp llms.txt docs/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs

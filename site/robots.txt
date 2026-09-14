@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://tanvoid0.github.io/llmwire/sitemap.xml

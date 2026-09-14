@@ -1,3 +1,4 @@
+/** @module llmwire/mcp-stdio */
 /**
  * MCP stdio transport (Node only): spawns the server and speaks
  * newline-delimited JSON-RPC over its stdin/stdout. Pass it to

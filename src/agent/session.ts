@@ -1,3 +1,4 @@
+/** @module llmwire/session */
 /**
  * Session: a conversation an agent continues across calls, kept in a `Store`
  * and held under a token budget. No tokenizer ships: the estimate is

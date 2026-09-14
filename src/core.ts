@@ -1,3 +1,4 @@
+/** @module llmwire/core */
 // Everything except the built-in providers: the factory, errors, types and
 // the helpers a custom provider needs. Pair with one provider subpath for the
 // smallest bundle; `.` adds the five built-ins and the zero-config `aiFactory`.

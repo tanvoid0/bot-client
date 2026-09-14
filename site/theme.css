@@ -1,0 +1,118 @@
+/* Shared docs theme over typedoc's default. shadcn "zinc" palette, one
+ * accent. Per package, change the two --brand-* lines; leave the rest. */
+
+:root {
+  --brand-accent-light: #0891b2;   /* links, light mode */
+  --brand-accent-dark: #22d3ee;    /* links, dark mode */
+
+  /* light: shadcn zinc */
+  --light-color-background: #ffffff;
+  --light-color-background-secondary: #f4f4f5;
+  --light-color-background-active: #f4f4f5;
+  --light-color-accent: #e4e4e7;
+  --light-color-active-menu-item: #f4f4f5;
+  --light-color-text: #09090b;
+  --light-color-text-aside: #71717a;
+  --light-color-link: var(--brand-accent-light);
+  --light-color-focus-outline: #18181b;
+
+  /* dark: shadcn zinc */
+  --dark-color-background: #09090b;
+  --dark-color-background-secondary: #18181b;
+  --dark-color-background-active: #27272a;
+  --dark-color-accent: #27272a;
+  --dark-color-active-menu-item: #27272a;
+  --dark-color-text: #fafafa;
+  --dark-color-text-aside: #a1a1aa;
+  --dark-color-link: var(--brand-accent-dark);
+  --dark-color-focus-outline: #fafafa;
+
+  --radius: 10px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.65;
+  font-size: 15px;
+}
+code, pre, .tsd-signature {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+a { text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.container { max-width: 1280px; }
+.container-main { margin-top: 2.5rem; }
+.col-content { max-width: 760px; }
+
+/* toolbar: hairline, translucent */
+.tsd-page-toolbar {
+  position: sticky; top: 0;
+  backdrop-filter: saturate(180%) blur(12px);
+  background: color-mix(in srgb, var(--color-background) 80%, transparent);
+  border-bottom: 1px solid var(--color-accent);
+}
+.tsd-page-toolbar .title { font-weight: 600; letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 0.55rem; }
+.tsd-page-toolbar .title::before { content: ""; width: 20px; height: 20px; background: url(favicon.svg) center/contain no-repeat; }
+#tsd-toolbar-links a { color: var(--color-text-aside); font-size: 0.875rem; margin-left: 1.25rem; }
+#tsd-toolbar-links a:hover { color: var(--color-text); text-decoration: none; }
+
+/* headings */
+h1, h2, h3, h4 { letter-spacing: -0.02em; font-weight: 600; color: var(--color-text); }
+.tsd-page-title h1 { font-size: 2rem; font-weight: 700; margin: 0.25rem 0 1.25rem; }
+.tsd-page-title:has(> h1) + .tsd-panel.tsd-typography > h1:first-child { display: none; }
+.tsd-page-title:has(+ .tsd-panel.tsd-typography > p:first-child > img:only-child) { display: none; }
+.tsd-breadcrumb { color: var(--color-text-aside); font-size: 0.85rem; }
+.tsd-typography > h1, .tsd-typography > h2, .tsd-typography > h3 { padding: 0; }
+.tsd-typography h2 { font-size: 1.35rem; margin: 3rem 0 0.75rem; }
+.tsd-typography h3 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
+.tsd-typography p, .tsd-typography li { color: var(--color-text); }
+.tsd-typography blockquote { border-left: 2px solid var(--color-accent); color: var(--color-text-aside); margin-left: 0; padding-left: 1rem; }
+.tsd-typography img { vertical-align: middle; margin: 0 0.15rem 0.25rem 0; }
+.tsd-typography table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 0.9rem; }
+.tsd-typography th, .tsd-typography td { border-bottom: 1px solid var(--color-accent); padding: 0.5rem 0.75rem; text-align: left; }
+.tsd-typography th { color: var(--color-text-aside); font-weight: 500; }
+.tsd-typography hr { border: 0; border-top: 1px solid var(--color-accent); margin: 3rem 0; }
+
+/* landing logo */
+.tsd-page-title + .tsd-panel.tsd-typography > p:first-child { margin: 0 0 1.5rem; }
+.tsd-page-title + .tsd-panel.tsd-typography > p:first-child img { margin: 0; }
+
+/* code */
+pre {
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-background-secondary);
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+}
+pre code { white-space: pre; }
+:not(pre) > code {
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  background: var(--color-background-secondary);
+  color: var(--color-text);
+}
+pre > button { border-radius: 6px; border: 1px solid var(--color-accent); background: var(--color-background); }
+
+/* panels + signatures */
+.tsd-panel { border-radius: var(--radius); }
+.tsd-signature { border: 1px solid var(--color-accent); border-radius: var(--radius); background: var(--color-background-secondary); padding: 0.75rem 1rem; }
+.tsd-member { border-top: 1px solid var(--color-accent); padding-top: 1.25rem; margin-top: 1.25rem; }
+.tsd-index-panel .tsd-index-list { gap: 0.25rem 1rem; }
+.tsd-accordion-summary h3, .tsd-accordion-summary h5 { font-weight: 600; }
+
+/* sidebar */
+.site-menu, .page-menu { font-size: 0.9rem; }
+.tsd-navigation a { border-radius: 6px; color: var(--color-text-aside); }
+.tsd-navigation a:hover { color: var(--color-text); text-decoration: none; background: var(--color-background-secondary); }
+.tsd-navigation a.current { color: var(--color-text); font-weight: 500; background: var(--color-active-menu-item); }
+.tsd-navigation .tsd-kind-icon { opacity: 0.8; }
+.tsd-accordion-summary { color: var(--color-text-aside); }
+.tsd-accordion-summary h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* footer */
+footer { border-top: 1px solid var(--color-accent); color: var(--color-text-aside); font-size: 0.85rem; }
+footer a { color: var(--color-text-aside); }

@@ -1,3 +1,4 @@
+/** @module llmwire/ollama-cli */
 import { spawn } from 'child_process';
 
 /** Result of running an Ollama CLI command */

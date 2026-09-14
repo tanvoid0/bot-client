@@ -1,3 +1,4 @@
+/** @module llmwire/lmstudio */
 import { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai-compatible.js';
 import type { AIRequest, AIResponse } from '../types/index.js';
 

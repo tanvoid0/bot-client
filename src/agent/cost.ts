@@ -1,3 +1,4 @@
+/** @module llmwire/cost */
 /**
  * Cost estimate from `usage` and a dated price table. USD per million
  * tokens, list prices for the vendors' own APIs (Anthropic, OpenAI, Google,

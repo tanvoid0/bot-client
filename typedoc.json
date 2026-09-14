@@ -1,8 +1,43 @@
 {
-  "entryPoints": ["src/index.ts", "src/core.ts", "src/ollama-cli.ts"],
+  "$schema": "https://typedoc.org/schema.json",
+  "plugin": ["./site/typedoc-plugin.mjs"],
+  "entryPoints": [
+    "src/index.ts",
+    "src/core.ts",
+    "src/providers/openai-provider.ts",
+    "src/providers/anthropic-provider.ts",
+    "src/providers/gemini-provider.ts",
+    "src/providers/ollama-provider.ts",
+    "src/providers/lmstudio-provider.ts",
+    "src/providers/openai-compatible.ts",
+    "src/agent/agent.ts",
+    "src/agent/session.ts",
+    "src/agent/mcp.ts",
+    "src/agent/mcp-stdio.ts",
+    "src/agent/embed.ts",
+    "src/agent/cost.ts",
+    "src/agent/routine.ts",
+    "src/ollama-cli.ts"
+  ],
   "out": "docs",
-  "name": "llmwire",
-  "readme": "README.md",
+  "readme": "site/index.md",
+  "projectDocuments": ["README.md", "site/examples.md", "MIGRATION.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "CHANGELOG.md"],
+  "includeVersion": true,
   "excludePrivate": true,
-  "excludeInternal": true
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "hostedBaseUrl": "https://tanvoid0.github.io/llmwire/",
+  "navigationLinks": {
+    "GitHub": "https://github.com/tanvoid0/llmwire",
+    "npm": "https://www.npmjs.com/package/llmwire",
+    "llms.txt": "https://tanvoid0.github.io/llmwire/llms.txt"
+  },
+  "customCss": "site/theme.css",
+  "favicon": "site/favicon.svg",
+  "customFooterHtml": "<a href=\"https://github.com/tanvoid0/llmwire\">llmwire</a> · MIT",
+  "searchInDocuments": true,
+  "headings": { "readme": false, "document": true },
+  "navigation": { "includeCategories": false, "includeGroups": false, "compactFolders": true },
+  "visibilityFilters": { "protected": false, "inherited": true, "external": false },
+  "cleanOutputDir": true
 }
